@@ -1,0 +1,10 @@
+total 44K
+-rw-rw-rw- 1 root root  540 Sep 26 09:08 README.md
+drwxr-xr-x 2 root root 4.0K Sep 30 11:20 __pycache__
+-rw-rw-rw- 1 root root  13K Sep 26 09:08 conftest.py
+drwxrwxrwx 3 root root 4.0K Sep 26 09:08 mb_example_common
+drwxr-xr-x 3 root root 4.0K Sep 30 11:20 pytest_embedded_log
+-rw-r--r-- 1 root root 1.1K Sep 30 11:21 results_v6.0-dev_examples.xml
+drwxrwxrwx 5 root root 4.0K Sep 30 11:20 serial
+drwxrwxrwx 5 root root 4.0K Sep 30 11:20 tcp
+-rw-r--r-- 1 root root    0 Sep 30 11:21 test_dir_examples.txt

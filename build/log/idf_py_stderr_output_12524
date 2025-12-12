@@ -1,0 +1,39 @@
+Command: cmake -G Ninja -DPYTHON_DEPS_CHECKED=1 -DPYTHON=C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe -DESP_PLATFORM=1 -DCCACHE_ENABLE=1 C:\Users\Abhishek\P1
+CMake Error at C:/Users/Abhishek/esp/v5.5.1/esp-idf/tools/cmake/component.cmake:229 (message):
+  CMake Warning (dev) at build_properties.temp.cmake:8:
+
+    Syntax Warning in cmake code at column 106
+
+  
+
+    Argument not separated from preceding token by whitespace.
+
+  Call Stack (most recent call first):
+
+    C:/Users/Abhishek/esp/v5.5.1/esp-idf/tools/cmake/scripts/component_get_requirements.cmake:3 (include)
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+
+
+  CMake Error at C:/Users/Abhishek/P1/main/CMakeLists.txt:1:
+
+    Parse error.  Function missing ending ")".  End of file reached.
+
+  Call Stack (most recent call first):
+
+    C:/Users/Abhishek/esp/v5.5.1/esp-idf/tools/cmake/scripts/component_get_requirements.cmake:107 (include)
+    C:/Users/Abhishek/esp/v5.5.1/esp-idf/tools/cmake/scripts/component_get_requirements.cmake:160 (__component_get_requirements)
+
+  
+
+
+
+  fatal: not a git repository (or any of the parent directories): .git
+
+Call Stack (most recent call first):
+  C:/Users/Abhishek/esp/v5.5.1/esp-idf/tools/cmake/build.cmake:664 (__component_get_requirements)
+  C:/Users/Abhishek/esp/v5.5.1/esp-idf/tools/cmake/project.cmake:740 (idf_build_process)
+  CMakeLists.txt:8 (project)
+
+

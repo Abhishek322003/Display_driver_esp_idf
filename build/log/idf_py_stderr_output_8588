@@ -1,0 +1,11 @@
+Command: cmake -G Ninja -DPYTHON_DEPS_CHECKED=1 -DPYTHON=C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe -DESP_PLATFORM=1 -DCCACHE_ENABLE=1 C:\Users\Abhishek\P1
+CMake Error at C:/Users/Abhishek/esp/v5.5.1/esp-idf/tools/cmake/build.cmake:328 (message):
+  Failed to resolve component 'esp_adc_cal' required by component 'main':
+  unknown name.
+Call Stack (most recent call first):
+  C:/Users/Abhishek/esp/v5.5.1/esp-idf/tools/cmake/build.cmake:371 (__build_resolve_and_add_req)
+  C:/Users/Abhishek/esp/v5.5.1/esp-idf/tools/cmake/build.cmake:685 (__build_expand_requirements)
+  C:/Users/Abhishek/esp/v5.5.1/esp-idf/tools/cmake/project.cmake:740 (idf_build_process)
+  CMakeLists.txt:8 (project)
+
+
