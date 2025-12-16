@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "P1",
-    "project_version":    "1",
+    "project_version":    "f9414ee-dirty",
     "project_path":       "C:/Users/Abhishek/P1",
     "idf_path":           "C:/Users/Abhishek/esp/v5.5.1/esp-idf",
     "build_dir":          "C:/Users/Abhishek/P1/build",

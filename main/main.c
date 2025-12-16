@@ -14,7 +14,7 @@
 
 static const char *TAG = "MAIN";
 
-uint8_t start_charging = 0;
+uint8_t start_charging,ready_for_charging;
 esp_timer_handle_t timer_1000ms;
 esp_timer_handle_t timer_300ms; 
 

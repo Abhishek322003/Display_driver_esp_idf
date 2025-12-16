@@ -7,6 +7,8 @@
 void *mb_ctx = 0;
 #define TAG "ENERGY_METER"
 
+static ac_meter_data_t ac_meter;
+static dc_meter_data_t dc_meter;
 
 static float decodeFloat(uint16_t low, uint16_t high)
 {
@@ -23,33 +25,58 @@ float readFloatID(uint8_t slave_id, uint16_t reg_start)
         .reg_start  = reg_start,
         .reg_size   = 2
     };
-
     uint16_t raw[2] = {0};
-
     esp_err_t err = mbc_master_send_request(mb_ctx, &req, raw);
-
     if (err == ESP_OK)
     {
         ESP_LOGI(TAG, "Reg %u -> RAW: 0x%04X 0x%04X", reg_start, raw[1], raw[0]);
         return decodeFloat(raw[0], raw[1]);
     }
-
     ESP_LOGE(TAG, "Modbus Read Fail (reg %u), err=0x%x", reg_start, err);
-
     return -9999.0f;   
+}
+
+ void update_dc_meter(){
+    dc_meter.dc_voltage = readFloatID(DC_METER_SLAVE_ID, DC_REG_VOLT);
+    dc_meter.dc_current = readFloatID(DC_METER_SLAVE_ID, DC_REG_CURR);
+    dc_meter.dc_power   = readFloatID(DC_METER_SLAVE_ID, DC_REG_WATT);
+    dc_meter.dc_kwh     = readFloatID(DC_METER_SLAVE_ID, DC_REG_KWH);
+    ESP_LOGI(TAG,
+        "DC Meter -> V: %.2f V | I: %.2f A | P: %.2f W | E: %.2f kWh",
+        dc_meter.dc_voltage,
+        dc_meter.dc_current,
+        dc_meter.dc_power,
+        dc_meter.dc_kwh
+    );
+
+}
+ void update_ac_meter(){
+    ac_meter.L1_current = readFloatID(AC_METER_SLAVE_ID, AC_L1_CUR);
+    ac_meter.L2_current = readFloatID(AC_METER_SLAVE_ID, AC_L2_CUR);
+    ac_meter.L3_current = readFloatID(AC_METER_SLAVE_ID, AC_L3_CUR);
+    ac_meter.L1_voltage = readFloatID(AC_METER_SLAVE_ID, AC_L1_VOL);
+    ac_meter.L2_voltage = readFloatID(AC_METER_SLAVE_ID, AC_L2_VOL);
+    ac_meter.L3_voltage = readFloatID(AC_METER_SLAVE_ID, AC_L3_VOL);
+    ac_meter.avg_line_voltage = readFloatID(AC_METER_SLAVE_ID, AVG_LINE_VOL);
+    ac_meter.system_pf  = readFloatID(AC_METER_SLAVE_ID, SYSTEM_PF);
+    ESP_LOGI(TAG,
+        "AC Meter -> V(L1/L2/L3): %.1f / %.1f / %.1f V | I(L1/L2/L3): %.2f / %.2f / %.2f A | PF: %.2f",
+        ac_meter.L1_voltage,
+        ac_meter.L2_voltage,
+        ac_meter.L3_voltage,
+        ac_meter.L1_current,
+        ac_meter.L2_current,
+        ac_meter.L3_current,
+        ac_meter.system_pf
+    );
+
 }
 
 void push_energy_meter_data()
 {
-    float voltage = readFloatID(DC_METER_SLAVE_ID, DC_REG_VOLT);
-    float current = readFloatID(DC_METER_SLAVE_ID, DC_REG_CURR);
-    float power = readFloatID(DC_METER_SLAVE_ID, DC_REG_WATT);
-    float energy = readFloatID(DC_METER_SLAVE_ID, DC_REG_KWH);
-
-    ESP_LOGI(TAG, "DC Meter - Voltage: %.2f V, Current: %.2f A, Power: %.2f W, Energy: %.2f kWh",
-             voltage, current, power, energy);
-}   
-
+    update_ac_meter();
+    update_dc_meter();
+}
 
 void energy_meter_init(void){
      nvs_flash_init();
