@@ -5,8 +5,7 @@
 #include "esp_timer.h"
 extern uint16_t error_flags ;
 extern esp_timer_handle_t timer_3sec;
-#define ERR_STRING_ADDR 0X1900
-#define ERR_NUMBER_ADDR 0X1800
+
 ESP_EVENT_DECLARE_BASE(ERROR_EVENT);
 extern volatile bool err_flag;
 typedef enum {

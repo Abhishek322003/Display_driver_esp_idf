@@ -6,7 +6,10 @@
 #include "can_network.h"
 #include "esp_event.h"
 extern uint16_t error_flags,display_feedback;
-extern volatile bool ccs2_gun_status_flag,ccs2_write_meter_flag;
+extern volatile bool ccs2_gun_status_flag;
+#define ERR_STRING_ADDR 0X1900
+#define ERR_NUMBER_ADDR 0X1800
+
 //extern bool unplugged_sent;
 
 #define UNPLUGGED 1
