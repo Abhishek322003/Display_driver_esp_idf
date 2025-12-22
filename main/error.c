@@ -7,6 +7,8 @@
 #include "esp_mac.h"
 #include "esp_log.h"
 #include "esp_event.h"
+#include "display.h"
+#include "driver/uart.h"
 
 static uint16_t error_str_addr=ERR_STRING_ADDR;
 static uint16_t error_num_addr=ERR_NUMBER_ADDR;
@@ -15,17 +17,9 @@ const char* tag="ERROR:";
 ESP_EVENT_DEFINE_BASE(ERROR_EVENT);
 static esp_event_loop_handle_t error_event_loop = NULL;
 
-void check_emergency_stop()
-{
-    gpio_set_direction(emergency_switch_pin, GPIO_MODE_INPUT);
-        if (!gpio_get_level(emergency_switch_pin)) {
-        error_flags |= ERR_EMERGENCY_STOP;
-    } else {
-        error_flags &= ~ERR_EMERGENCY_STOP;
-    }
-}//1,2,3,4  ///communication error
 void write_error_msg() {
-    switch_to_page(4);
+    clear_screen(0x1800);
+    clear_screen(0x1900);
     for(uint8_t i = 1; i < 12; i++) {
         if ((error_flags >> i) & 1) {
             switch (i) {
@@ -80,6 +74,8 @@ void write_error_msg() {
             }
         }
     }
+    //clear_screen(ERR_STRING_ADDR);
+    //clear_screen(ERR_NUMBER_ADDR);
     error_str_addr=ERR_STRING_ADDR;
     error_num_addr=ERR_NUMBER_ADDR;
 }
@@ -132,7 +128,7 @@ static void error_event_loop_init(){
      esp_event_loop_args_t error_loop_args = {
         .queue_size = 10,
         .task_name = "error_task",
-        .task_priority = 5,
+        .task_priority = 6,
         .task_stack_size = 4096,
         .task_core_id = tskNO_AFFINITY
     };
@@ -153,12 +149,13 @@ static void error_event_loop_init(){
     ESP_LOGI(tag, "ERROR event loop created");
 }
 
-void send_error_event(error_events_t event)
+void send_error_event(void  *event)
 {
+    error_events_t ev = *(error_events_t *)event;
     esp_event_post_to(
         error_event_loop,
         ERROR_EVENT,
-        event,
+        ev,
         NULL,
         0,
         0
@@ -219,21 +216,23 @@ void display_error_msg(bool error_addr_flag, const char *error_data)
 }
 
 
-
-void gpio_init(void)
-{
-    gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_DISABLE,
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = (1ULL << emergency_switch_pin),
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .pull_up_en = GPIO_PULLUP_ENABLE
-    };
-    gpio_config(&io_conf);
-}
 void error_init(void)
 {   
+    dwin_can_write(0X1900,0xffff);//to clear the screen in one command
+    dwin_can_write(0x1800,0xffff);
+    ESP_LOGI("ERROR","SCREEN CLEARED");
     error_event_loop_init();
-    gpio_init();
-
 }   
+void uart_init(){
+    uart_config_t uart_conf = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
+    
+
+    uart_driver_install(UART_NUM, UART_BUF_SIZE*2, 0, 0, NULL, 0);
+    uart_param_config(UART_NUM, &uart_conf);
+}

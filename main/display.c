@@ -6,109 +6,149 @@
 #include "esp_timer.h"
 #include "energy_meter.h"
 #include "esp_event.h"
-
+#include "error.h"
 uint16_t error_flags;
 const char *TAG="DISPLAY";
 
 ESP_EVENT_DEFINE_BASE(DISPLAY_EVENT);
 
-
+//esp_timer_handle_t timer_10min;
+//esp_timer_handle_t timer_300ms; 
 static esp_event_loop_handle_t display_event_loop = NULL;
 
-
-
-
-
 can_msg_t read_display = {
-    .id = dwin_read_id,
+    .id = DWIN_READ_ID,
     .dlc = 8,
-    .buff = {0x06, read_cmd, 0x00, 0x00, 0x00, 0x00}
+    .buff = {0x06, READ_CMD, 0x00, 0x00, 0x00, 0x00}
 };
 
 can_msg_t write_display = {
-    .id = dwin_write_id,
+    .id = DWIN_WRITE_ID,
     .dlc = 6,
     .buff = {0x05, write_cmd, 0x00, 0x00, 0x00, 0x00}
 };
+static void set_the_error_flag(uint16_t value){
+    if (value > 0 && value < 12) {
+		if (value == 1) {
+			error_flags |= ERR_CHARGE_STOPPED;
+		}
+		else if (value == 2) {
+			error_flags |= ERR_EMERGENCY_STOP;
+		}
+		else if (value == 3) {
+			error_flags |= ERR_UNDER_VOLTAGE;
+		}
+		else if (value == 4) {
+			error_flags |= ERR_COMMUNICATION;
+		}
+		else if (value == 5) {
+			error_flags |= ERR_CHARGER_OVER_TEMPERATURE;
+		}
+		else if (value == 6) {
+			error_flags |= ERR_EARTH_FAULT;
+		}
+		else if (value == 7) {
+			error_flags |= ERR_CONTACTOR_FAULT;
+		}
+		else if (value == 8) {
+			error_flags |= ERR_RELAY_WELD_FAULT;
+		}
+		else if (value == 9) {
+			error_flags |= ERR_CP_INVALID;
+		}
+		else if (value == 10) {
+			error_flags |= ERR_NETWORK_FAULT;
+		}
+		else if (value == 11) {
+			error_flags |= ERR_OVER_VOLTAGE;
+		}
+	}
+	else {
+		ESP_LOGW(TAG, "Invalid error index: %d", value);
+        return;
+	}
 
-void display_event_handler(void *arg,esp_event_base_t base,int32_t event_id,void *event_data){
-    (void)arg;
-    (void)base;
-    display_events_t event = (display_events_t)event_id;
-    switch (event) {
-    case CCS2_GUN_CONNECTED:
-        dwin_can_write(0x2000, 0);
-        break;
-    case CCS2_GUN_DISCONNECTED:
-        dwin_can_write(0x2000, 4);
-        break;
-    case GUN2_TYPE6_CONNECTED:
-        dwin_can_write(0x2100, 0);
-        break;
-    case GUN2_TYPE6_DISCONNECTED:
-        dwin_can_write(0x2100, 4);
-        break;
-    case AC_SOCKET_CONNECTED:
-        dwin_can_write(0x2200, 0);
-        break;
-    case AC_SOCKET_DISCONNECTED:
-        dwin_can_write(0x2200, 4);
-        break;
-    case INTIAL_SOC:
-    case CURRENT_SOC:
-    case DEMAND_VOLTAGE:
-    case UNIT_RATE:
-    case AMOUNT:
-    case CHARGING_POWER:
-    case GUN_TEMPERATURE:
-    {
-        if (event_data == NULL) {
-            ESP_LOGW(TAG, "Event %d missing data", event);
-            break;
-        }
 
-        display_req_data_t *data = (display_req_data_t *)event_data;
-
-        switch (event) {
-        case INTIAL_SOC:
-            dwin_can_write(0x3000, data->value);
-            break;
-
-        case CURRENT_SOC:
-            dwin_can_write(0x3002, data->value);
-            break;
-
-        case DEMAND_VOLTAGE:
-            dwin_can_write(0x3004, data->value);
-            break;
-
-        case UNIT_RATE:
-            dwin_can_write(0x3006, data->value);
-            break;
-
-        case AMOUNT:
-            dwin_can_write(0x3008, data->value);
-            break;
-
-        case CHARGING_POWER:
-            dwin_can_write(0x3010, data->value);
-            break;
-
-        case GUN_TEMPERATURE:
-            dwin_can_write(0x3012, data->value);
-            break;
-
-        default:
-            break;
-        }
-        break;
-    }
-
-    default:
-        ESP_LOGW(TAG, "Unknown display event: %d", event);
-        break;
-    }
 }
+
+void display_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+	(void)arg;
+	(void)base;
+
+	display_events_t event = (display_events_t)event_id;
+
+	if (event > AC_SOCKET_DISCONNECTED && event_data == NULL) {
+		ESP_LOGW(TAG, "Event %d received without data", event);
+		return;
+	}
+	display_req_data_t *data = (display_req_data_t *)event_data;
+	switch (event) {
+
+	case CCS2_GUN_CONNECTED:
+		ccs2_gun_status_flag = true;
+		break;
+
+	case CCS2_GUN_DISCONNECTED:
+		dwin_can_write(CCS2_GUN1_ADDR, UNPLUGGED);
+		ccs2_gun_status_flag = false;
+		break;
+
+	case GUN2_TYPE6_CONNECTED:
+		dwin_can_write(0x2100, 0);
+		break;
+
+	case GUN2_TYPE6_DISCONNECTED:
+		dwin_can_write(0x2100, 4);
+		break;
+
+	case AC_SOCKET_CONNECTED:
+		dwin_can_write(0x2200, 0);
+		break;
+
+	case AC_SOCKET_DISCONNECTED:
+		dwin_can_write(0x2200, 4);
+		break;
+
+	case INTIAL_SOC:
+		dwin_can_write(CCS2_INITIAL_SOC, data->value);
+		break;
+
+	case CURRENT_SOC:
+		dwin_can_write(CCS2_CURRENT_SOC, data->value);
+		break;
+
+	case DEMAND_VOLTAGE:
+		dwin_can_write(CCS2_DEMAND_VOLTAGE, data->value);
+		break;
+
+	case UNIT_RATE:
+		dwin_can_write(CCS2_UNIT_RATE, data->value);
+		break;
+
+	case AMOUNT:
+		dwin_can_write(CCS2_AMOUNT, data->value);
+		break;
+
+	case CHARGING_POWER:
+		dwin_can_write(CCS2_CHARGING_POWER, data->value);
+		break;
+
+	case GUN_TEMPERATURE:
+		dwin_can_write(CCS2_GUN_TEMPERATURE, data->value);
+		break;
+	case ERROR_DISPLAY_EVENT:
+        ESP_LOGI("DISPLAY:","error event recieved with data %d",data->value);
+        set_the_error_flag(data->value);
+		break;
+	default:
+		break;
+	}
+}
+
+
+
+
 void write_cp_state_to_display(void* status){
     bool state=(bool *)status;
     if(state){
@@ -122,12 +162,13 @@ void write_cp_state_to_display(void* status){
 }
 
 
- void send_display_event(display_events_t event)
+ void send_display_event(void* event)
 {
+    display_events_t ev=*(display_events_t *)event;
     esp_event_post_to(
         display_event_loop,
         DISPLAY_EVENT,
-        event,
+        ev,
         NULL,
         0,
         0
@@ -183,15 +224,26 @@ static void display_event_loop_init(void)
     ESP_LOGI(TAG, "Display event loop created");
 }
 
-
+static void reset_display(){
+    dwin_can_write(CCS2_GUN1_ADDR,UNPLUGGED);
+    dwin_can_write(0X2000,UNPLUGGED);
+    dwin_can_write(0X3000,UNPLUGGED);
+    dwin_can_write(0x5000,1);
+    hide_data(CCS2_GUN1_ADDR);
+    hide_data(GUN2_SP_ADDR);
+    hide_data(AC_SP_ADDR);
+}
 
 void dwin_init_pages(void)
 {
     can_network_register_rx_cb(TWAI_CAN, dwin_can_rx_handler);
     display_event_loop_init();
     switch_to_page(0);
+    dwin_can_write(CCS2_GUN1_ADDR,UNPLUGGED);
+    dwin_can_write(CCS2_GUN1_S_STOP_ADDR,0);
+    reset_display();
     vTaskDelay(pdMS_TO_TICKS(2000));
-    switch_to_page(1);
+    switch_to_page(8);//gun is in unplugged state
 }
 
 uint16_t dwin_can_read(uint16_t addr)
@@ -213,7 +265,16 @@ uint16_t dwin_can_read(uint16_t addr)
     return 0;
 }
 
+void dwin_can_hide_write(uint16_t addr, uint16_t value){
+    write_display.buff[2] = (addr >> 8) & 0xFF;
+    write_display.buff[3] = addr & 0xFF;
+    write_display.buff[4] = (value >> 8) & 0xFF;
+    write_display.buff[5] =value& 0xFF;
 
+    can_network_transmit_std_id(TWAI_CAN, &write_display);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+}
 void dwin_can_write(uint16_t addr, uint16_t value)
 {
     write_display.buff[2] = (addr >> 8) & 0xFF;
@@ -223,39 +284,44 @@ void dwin_can_write(uint16_t addr, uint16_t value)
 
     can_network_transmit_std_id(TWAI_CAN, &write_display);
     ESP_LOGI(TAG, "Wrote value 0x%04X to address 0x%04X", value, addr);
-    vTaskDelay(pdMS_TO_TICKS(10));
     
 }
 //start stop command handler from display feedback
 void dwin_can_rx_handler(const can_msg_t *msg)
 {
-    ESP_LOGI(TAG, "Received CAN message with ID 0x%03X and DLC %d", msg->id, msg->dlc);
-    if(msg->id==dwin_read_id && msg->dlc==8)
-    {
-        if(msg->buff[2]==start_stop_addr>>8&& msg->buff[3]==(start_stop_addr&0xFF))
-        {
-            uint16_t status=(msg->buff[4]<<8)|msg->buff[5];
-            if(status)//chagnge the value of status from 0x10 to 0x1
-            {
-                ESP_LOGI(TAG, "Start command received\n");
-                start_charging=1;
-                switch_to_page(4); 
-                esp_timer_start_periodic(energy_meter_timer,4000000);//write the data for every 4seconds
-            }
-            else
-            {
-                start_charging=0;
-                switch_to_page(3);
-                ESP_LOGI(TAG, "Stop command received\n");
-                esp_timer_stop(energy_meter_timer);
+    ESP_LOGI(TAG,"Received id:%04X %02X %02X %02X %02X %02X %02X %02X %02X",msg->id,msg->buff[0],msg->buff[1],msg->buff[2],msg->buff[3],msg->buff[4],msg->buff[5],msg->buff[6],msg->buff[7]);
+
+    if(msg->buff[0]==0x06 && msg->buff[1]==READ_CMD){
+        if(msg->buff[2]==((CCS2_GUN1_S_STOP_ADDR>>8)&0xFF) &&
+           msg->buff[3]==(CCS2_GUN1_S_STOP_ADDR&0xFF)){
+            
+            if(msg->buff[6]){ // START
+                ESP_LOGI(TAG,"start command received");
+                display_feedback_flag.ccs2=true;
+            }else{ // STOP
+                ESP_LOGI(TAG,"stop command received");
+                if(display_feedback_flag.ccs2_t){ // charging active
+                    display_feedback_flag.ccs2=false;
+                    ESP_LOGI(TAG,"gun is unplugged");
+                }
             }
         }
     }
 }
 
+void hide_data(uint16_t addr){
+    dwin_can_write(addr,0xff00);//0xff00 to hide the data 
+}
+void remove_hide(uint16_t addr,uint16_t vp_addr){
+    dwin_can_write(addr,vp_addr);
+}
 
-void clear_screen(uint16_t addr){
-    for(uint16_t i=0;i<512;i++){
+
+void clear_screen(uint16_t addr){/*
+    dwin_can_write(ERR_STRING_ADDR,DISPLAY_TERMINATOR);
+    dwin_can_write(ERR_NUMBER_ADDR,DISPLAY_TERMINATOR);
+    */
+   for(uint16_t i=0;i<300;i++){
         dwin_can_write(addr+i,' ');
     }
 }

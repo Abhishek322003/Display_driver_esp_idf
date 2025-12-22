@@ -2,12 +2,15 @@
 #define ERROR_H
 #include <stdint.h>
 #include "esp_event.h"
+#include "esp_timer.h"
 extern uint16_t error_flags ;
-#define ERR_STRING_ADDR 0X1600
+extern esp_timer_handle_t timer_3sec;
+#define ERR_STRING_ADDR 0X1900
 #define ERR_NUMBER_ADDR 0X1800
 ESP_EVENT_DECLARE_BASE(ERROR_EVENT);
+extern volatile bool err_flag;
 typedef enum {
-    CHARGING_IS_STOPPED,
+    CHARGING_IS_STOPPED=1,
     EMERGENCY_SWITCH,
     UNDER_VOLTAGE,
     COMMUNICATION_ERROR,
@@ -17,15 +20,12 @@ typedef enum {
     RELAY_WELD_FAULT,
     CP_ERROR,
     NETWORK_ERROR,
-    OVER_VOLTAGE
+    OVER_VOLTAGE,
 }error_events_t ;
 
 typedef struct {
     uint16_t value;
 }error_req_data_t;
-
-
-#define emergency_switch_pin GPIO_NUM_15
 
 #define ERR_CHARGE_STOPPED (1<<0)
 #define ERR_EMERGENCY_STOP (1<<1)
@@ -38,8 +38,11 @@ typedef struct {
 #define ERR_CP_INVALID (1<<8)
 #define ERR_NETWORK_FAULT (1<<9)
 #define ERR_OVER_VOLTAGE (1<<10)
-void check_emergency_stop();
 void error_init();
-void send_error_event(error_events_t event);
+#define UART_NUM         UART_NUM_0
+#define UART_BUF_SIZE    128
+void uart_init();
+void send_error_event(void *);
+
 
 #endif
