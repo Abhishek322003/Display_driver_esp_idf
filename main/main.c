@@ -13,7 +13,6 @@
 #include "error.h"
 
 static const char *TAG = "MAIN";
-error_events_t error_event=CHARGING_IS_STOPPED;
 display_events_t main_event_1=CCS2_GUN_DISCONNECTED;
 display_feedback_t display_feedback_flag;
 esp_timer_handle_t timer_3sec;
@@ -39,7 +38,7 @@ static void handle_ccs2_start_charging(void)
     if(display_feedback_flag.ccs2 && !display_feedback_flag.ccs2_t){
         ESP_LOGI(TAG,"Charging started");
         dwin_can_write(CCS2_GUN1_ADDR,STOP_CHARGING);
-        esp_timer_start_periodic(timer_3sec,3000000);
+        esp_timer_start_periodic(timer_3sec,5000000);
         display_feedback_flag.ccs2_t=true;
         remove_hide(CCS2_SP_ADDR,CCS2_GUN1_S_STOP_ADDR);
     }
@@ -57,7 +56,7 @@ static void handle_ccs2_errors(void)
     if(!error_handler_flag) return;
     if(ccs2_error_screen_shown) return;
     switch_to_page(4);
-    dwin_can_write(CCS2_GUN1_ADDR,5);
+    dwin_can_write(CCS2_GUN1_ADDR,ERROR_SCREEN);
     uint8_t i;
     for(i=0;i<12;i++){
         if((error_flags>>i)&1) break;
@@ -127,20 +126,20 @@ void handle_uart_gun_input(const char *cmd)
 }
 void handle_uart_error_input(char *cmd)
 {
-    char *token = strtok(cmd + 1, " ");  
+    char *token = strtok(cmd + 1, " ");
     while (token != NULL) {
-        err_flag=true;
-        uint8_t  err_no = atoi(token);
+        uint8_t err_no = atoi(token);
         if (err_no >= 1 && err_no <= 11) {
-            error_event = (error_events_t)err_no;
-            send_error_event(&error_event);
+            send_display_value_event(ERROR_DISPLAY_EVENT, err_no);
             ESP_LOGI(TAG, "Error Event Sent: e%d", err_no);
-        } else {
+        } 
+        else {
             ESP_LOGW(TAG, "Invalid error number: %s", token);
         }
         token = strtok(NULL, " ");
     }
 }
+
 
 void uart_task(void *arg)
 {
@@ -209,6 +208,7 @@ void display_init(){
     xTaskCreate(uart_task,"uart_task",4096,NULL,6,NULL);
     xTaskCreate(write_meter_task,"meter_task",4096,NULL,7,NULL);
     }
+
 
 void app_main(void)
 {

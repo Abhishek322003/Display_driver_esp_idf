@@ -64,6 +64,7 @@ static void set_the_error_flag(uint16_t value){
 		else if (value == 11) {
 			error_flags |= ERR_OVER_VOLTAGE;
 		}
+        write_error_msg();
 	}
 	else {
 		ESP_LOGW(TAG, "Invalid error index: %d", value);
@@ -141,6 +142,8 @@ void display_event_handler(void *arg, esp_event_base_t base, int32_t event_id, v
 		break;
 	case ERROR_DISPLAY_EVENT:
         ESP_LOGI("DISPLAY:","error event recieved with data %d",data->value);
+        switch_to_page(4);
+        dwin_can_write(CCS2_GUN1_ADDR,ERROR_SCREEN);
         set_the_error_flag(data->value);
 		break;
 	default:
@@ -254,8 +257,7 @@ uint16_t dwin_can_read(uint16_t addr)
     read_display.buff[3] = addr & 0xFF;
 
     can_network_transmit_std_id(TWAI_CAN, &read_display);
-
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     if (read_display.dlc == 8 &&
         read_display.buff[2] == ((addr >> 8) & 0xFF) &&
@@ -356,67 +358,68 @@ void display_error_msg(bool error_addr_flag, const char *error_data)
      inc++;
      if(error_addr_flag){
        error_str_addr=error_addr+inc;
-       ESP_LOGI(tag, "%x erroraddr",error_str_addr);
+       ESP_LOGI(TAG, "%x erroraddr",error_str_addr);
      }
     else{
        error_num_addr=error_addr+inc;
-       ESP_LOGI(tag, "%x erroraddr",error_num_addr);
+       ESP_LOGI(TAG, "%x erroraddr",error_num_addr);
     }
 }
 
 void write_error_msg() {
     clear_screen(0x1800);
     clear_screen(0x1900);
-    for(uint8_t i = 1; i < 12; i++) {
+    for(uint8_t i = 0; i < 12; i++) {
         if ((error_flags >> i) & 1) {
+            dwin_can_write(CCS2_GUN1_ERROR_ADDR,401+i);
             switch (i) {
-                case 1:
+                case 0:
                     display_error_msg(1, "CHARGING IS STOPPED");display_error_msg(0, "401");
-                    ESP_LOGI(tag, "401 CHARGING IS STOPPED");
+                    ESP_LOGI(TAG, "401 CHARGING IS STOPPED");
+                    break;
+                case 1:
+                    display_error_msg(1, "EMERGENCY SWITCH PRESSED");display_error_msg(0, "402");
+                    ESP_LOGI(TAG, "402 EMERGENCY SWITCH PRESSED");
                     break;
                 case 2:
-                    display_error_msg(1, "EMERGENCY SWITCH PRESSED");display_error_msg(0, "402");
-                    ESP_LOGI(tag, "402 EMERGENCY SWITCH PRESSED");
+                    display_error_msg(1, "UNDER VOLTAGE");display_error_msg(0, "403");
+                    ESP_LOGI(TAG, "403 UNDER VOLTAGE");
                     break;
                 case 3:
-                    display_error_msg(1, "UNDER VOLTAGE");display_error_msg(0, "403");
-                    ESP_LOGI(tag, "403 UNDER VOLTAGE");
+                    display_error_msg(1, "COMMUNICATION ERROR");display_error_msg(0, "404");
+                    ESP_LOGI(TAG, "404 COMMUNICATION ERROR");
                     break;
                 case 4:
-                    display_error_msg(1, "COMMUNICATION ERROR");display_error_msg(0, "404");
-                    ESP_LOGI(tag, "404 COMMUNICATION ERROR");
+                    display_error_msg(1, "CHARGER OVER TEMPERATURE");display_error_msg(0, "405");
+                    ESP_LOGI(TAG, "405 CHARGER OVER TEMPERATURE");
                     break;
                 case 5:
-                    display_error_msg(1, "CHARGER OVER TEMPERATURE");display_error_msg(0, "405");
-                    ESP_LOGI(tag, "405 CHARGER OVER TEMPERATURE");
+                    display_error_msg(1, "EARTH FAULT");display_error_msg(0, "406");
+                    ESP_LOGI(TAG, "406 EARTH FAULT");
                     break;
                 case 6:
-                    display_error_msg(1, "EARTH FAULT");display_error_msg(0, "406");
-                    ESP_LOGI(tag, "406 EARTH FAULT");
+                    display_error_msg(1, "CONTACTOR FAULT");display_error_msg(0, "407");
+                    ESP_LOGI(TAG, "407 CONTACTOR FAULT");
                     break;
                 case 7:
-                    display_error_msg(1, "CONTACTOR FAULT");display_error_msg(0, "407");
-                    ESP_LOGI(tag, "407 CONTACTOR FAULT");
+                    display_error_msg(1, "RELAY WELD FAULT");display_error_msg(0, "408");
+                    ESP_LOGI(TAG, "408 RELAY WELD FAULT");
                     break;
                 case 8:
-                    display_error_msg(1, "RELAY WELD FAULT");display_error_msg(0, "408");
-                    ESP_LOGI(tag, "408 RELAY WELD FAULT");
+                    display_error_msg(1, "CP ERROR");display_error_msg(0, "409");
+                    ESP_LOGI(TAG, "409 CP ERROR");
                     break;
                 case 9:
-                    display_error_msg(1, "CP ERROR");display_error_msg(0, "409");
-                    ESP_LOGI(tag, "409 CP ERROR");
+                    display_error_msg(1, "NETWORK ERROR");display_error_msg(0, "410");
+                    ESP_LOGI(TAG, "410 NETWORK ERROR");
                     break;
                 case 10:
-                    display_error_msg(1, "NETWORK ERROR");display_error_msg(0, "410");
-                    ESP_LOGI(tag, "410 NETWORK ERROR");
-                    break;
-                case 11:
                     display_error_msg(1, "OVER VOLTAGE");display_error_msg(0, "411");
-                    ESP_LOGI(tag, "411 OVER VOLTAGE");
+                    ESP_LOGI(TAG, "411 OVER VOLTAGE");
                     break;
                 default:
                     display_error_msg(1, "UNKNOWN ERROR");display_error_msg(0, "412");
-                    ESP_LOGI(tag, "412 UNKNOWN ERROR");
+                    ESP_LOGI(TAG, "412 UNKNOWN ERROR");
                     break;
             }
         }
