@@ -1,56 +1,69 @@
 #ifndef DISPLAY_H
 #define DISPLAY_H
-
 #include <stdint.h>
 #include "stdbool.h"
 #include "can_network.h"
 #include "esp_event.h"
-extern uint16_t error_flags,display_feedback;
+#include "esp_timer.h"
+ESP_EVENT_DECLARE_BASE(DISPLAY_EVENT);
+extern uint16_t error_flags;
+extern uint16_t display_feedback;
 extern volatile bool ccs2_gun_status_flag;
+extern uint16_t error_flags ;
+extern esp_timer_handle_t timer_5sec;
 #define ERR_STRING_ADDR 0X1900
 #define ERR_NUMBER_ADDR 0X1800
-
-//extern bool unplugged_sent;
-
+#define UART_NUM         UART_NUM_0
+#define UART_BUF_SIZE    128
+//DISPLAY
+#define PAGE_SWITCH_ADDR        0x0085
+#define PAGE_SWITCH_INITADDR    0x0084
+#define DWIN_READ_ID            0x0100
+#define DWIN_WRITE_ID           0x0100
+#define READ_CMD                0x83
+#define WRITE_CMD               0x82
+#define LINE_BREAK_ADDR 0x5020
+#define LINE_BREAK_DATA 0x0D0A
+#define DISPLAY_HEADER 0X5000
+//COMMON
 #define UNPLUGGED 1
 #define PLUGGED 2
 #define START_CHARGING 3
 #define STOP_CHARGING 4
 #define ERROR_SCREEN 5
+//GUN1
 #define CCS2_SP_ADDR 0X9000
-#define GUN2_SP_ADDR 0X8000
-#define AC_SP_ADDR 0X7000
-
-
-
-
-
 #define CCS2_GUN1_ADDR 0X1000
 #define CCS2_GUN1_S_STOP_ADDR  0x1100
 #define CCS2_GUN1_ERROR_ADDR 0X1050
+//GUN2
+#define GUN2_SP_ADDR 0X8000
 #define TYPE6_GUN2_ADDR 0X2000
 #define TYPE6_GUN2_S_STOP_ADDR 0X2100
+
+//GUN3
+#define AC_SOCKET_ADDR 0X3000 
+#define AC_SP_ADDR 0X7000
+
+
 ///CCS2 GUN1 ADDRESES 
 #define CCS2_ADDR_LOWER  0X1500
 #define CCS2_ADDR_UPPER 0X1555
 #define DISPLAY_TERMINATOR 0XFFFF
 
-
-
-#define page_switch_addr        0x0085
-#define page_switch_initaddr    0x0084
-
-
-#define DWIN_READ_ID            0x0100
-#define DWIN_WRITE_ID           0x0100
-
-#define READ_CMD                0x83
-#define write_cmd               0x82
-
-#define line_break_addr 0x5020
-#define line_break_data 0x0D0A
-
-ESP_EVENT_DECLARE_BASE(DISPLAY_EVENT);
+//ERROR_FLAGS
+//extern volatile bool err_flag;
+#define ERR_CHARGE_STOPPED (1<<0)
+#define ERR_EMERGENCY_STOP (1<<1)
+#define ERR_UNDER_VOLTAGE   (1<<2)
+#define ERR_COMMUNICATION (1<<3)
+#define ERR_CHARGER_OVER_TEMPERATURE (1<<4)
+#define ERR_EARTH_FAULT  (1<<5)
+#define ERR_CONTACTOR_FAULT (1<<6)
+#define ERR_RELAY_WELD_FAULT (1<<7)
+#define ERR_CP_INVALID (1<<8)
+#define ERR_NETWORK_FAULT (1<<9)
+#define ERR_OVER_VOLTAGE (1<<10)
 
 typedef enum{
     CCS2_GUN_CONNECTED,
@@ -83,6 +96,8 @@ extern display_feedback_t display_feedback_flag;
 
 extern can_msg_t read_display;
 extern can_msg_t write_display;
+
+void uart_init();
 void send_display_event(void* event);
 void send_display_value_event(display_events_t event, uint16_t value);
 void dwin_init_pages(void);

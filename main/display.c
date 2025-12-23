@@ -6,7 +6,7 @@
 #include "esp_timer.h"
 #include "energy_meter.h"
 #include "esp_event.h"
-#include "error.h"
+#include "driver/uart.h"
 uint16_t error_flags;
 const char *TAG="DISPLAY";
 static uint16_t error_str_addr=ERR_STRING_ADDR;
@@ -27,8 +27,22 @@ can_msg_t read_display = {
 can_msg_t write_display = {
     .id = DWIN_WRITE_ID,
     .dlc = 6,
-    .buff = {0x05, write_cmd, 0x00, 0x00, 0x00, 0x00}
+    .buff = {0x05, WRITE_CMD, 0x00, 0x00, 0x00, 0x00}
 };
+void uart_init(){
+    uart_config_t uart_conf = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
+    
+
+    uart_driver_install(UART_NUM, UART_BUF_SIZE*2, 0, 0, NULL, 0);
+    uart_param_config(UART_NUM, &uart_conf);
+}
+
 static void set_the_error_flag(uint16_t value){
     if (value > 0 && value < 12) {
 		if (value == 1) {
@@ -198,8 +212,8 @@ void write_cp_state_to_display(void* status){
 
 void switch_to_page(uint8_t page_number)
 {
-    dwin_can_write(page_switch_addr, page_number);
-    dwin_can_write(page_switch_initaddr, 0x5A01);
+    dwin_can_write(PAGE_SWITCH_ADDR, page_number);
+    dwin_can_write(PAGE_SWITCH_INITADDR, 0x5A01);
     ESP_LOGI(TAG, "Switched to page %d", page_number);
 }
 static void display_event_loop_init(void)
@@ -231,10 +245,10 @@ static void display_event_loop_init(void)
 
 static void reset_display(){
     dwin_can_write(CCS2_GUN1_ADDR,UNPLUGGED);
-    dwin_can_write(0X2000,UNPLUGGED);
-    dwin_can_write(0X3000,UNPLUGGED);
-    dwin_can_write(0x5000,1);
-    hide_data(CCS2_GUN1_ADDR);
+    dwin_can_write(TYPE6_GUN2_ADDR,UNPLUGGED);
+    dwin_can_write(AC_SOCKET_ADDR,UNPLUGGED);
+    dwin_can_write(DISPLAY_HEADER,1);
+    hide_data(CCS2_SP_ADDR);
     hide_data(GUN2_SP_ADDR);
     hide_data(AC_SP_ADDR);
 }
@@ -296,9 +310,7 @@ void dwin_can_rx_handler(const can_msg_t *msg)
     ESP_LOGI(TAG,"Received id:%04X %02X %02X %02X %02X %02X %02X %02X %02X",msg->id,msg->buff[0],msg->buff[1],msg->buff[2],msg->buff[3],msg->buff[4],msg->buff[5],msg->buff[6],msg->buff[7]);
 
     if(msg->buff[0]==0x06 && msg->buff[1]==READ_CMD){
-        if(msg->buff[2]==((CCS2_GUN1_S_STOP_ADDR>>8)&0xFF) &&
-           msg->buff[3]==(CCS2_GUN1_S_STOP_ADDR&0xFF)){
-            
+        if(msg->buff[2]==((CCS2_GUN1_S_STOP_ADDR>>8)&0xFF) &&msg->buff[3]==(CCS2_GUN1_S_STOP_ADDR&0xFF)){
             if(msg->buff[6]){ // START
                 ESP_LOGI(TAG,"start command received");
                 display_feedback_flag.ccs2=true;
@@ -310,7 +322,14 @@ void dwin_can_rx_handler(const can_msg_t *msg)
                 }
             }
         }
+        else if(msg->buff[2]==((CCS2_GUN1_ADDR>>8)&0xFF)&&msg->buff[3]==(CCS2_GUN1_ADDR&0xFF)){
+            if(msg->buff[6]==UNPLUGGED){
+                hide_data(CCS2_SP_ADDR);
+                switch_to_page(8);
+            }
+
     }
+}
 }
 
 void hide_data(uint16_t addr){
@@ -321,13 +340,13 @@ void remove_hide(uint16_t addr,uint16_t vp_addr){
 }
 
 
-void clear_screen(uint16_t addr){/*
+void clear_screen(uint16_t addr){
     dwin_can_write(ERR_STRING_ADDR,DISPLAY_TERMINATOR);
     dwin_can_write(ERR_NUMBER_ADDR,DISPLAY_TERMINATOR);
-    */
+    /*
    for(uint16_t i=0;i<300;i++){
         dwin_can_write(addr+i,' ');
-    }
+    }*/
 }
 
 void display_error_msg(bool error_addr_flag, const char *error_data)
@@ -354,7 +373,7 @@ void display_error_msg(bool error_addr_flag, const char *error_data)
         dwin_can_write(error_addr+inc,space);
         inc++;
     }
-     dwin_can_write(error_addr+inc,line_break_data);
+     dwin_can_write(error_addr+inc,LINE_BREAK_DATA);
      inc++;
      if(error_addr_flag){
        error_str_addr=error_addr+inc;
@@ -365,65 +384,66 @@ void display_error_msg(bool error_addr_flag, const char *error_data)
        ESP_LOGI(TAG, "%x erroraddr",error_num_addr);
     }
 }
-
 void write_error_msg() {
     clear_screen(0x1800);
     clear_screen(0x1900);
     for(uint8_t i = 0; i < 12; i++) {
         if ((error_flags >> i) & 1) {
-            dwin_can_write(CCS2_GUN1_ERROR_ADDR,401+i);
+            dwin_can_write(CCS2_GUN1_ERROR_ADDR, 401 + i);//to write for once
             switch (i) {
                 case 0:
-                    display_error_msg(1, "CHARGING IS STOPPED");display_error_msg(0, "401");
-                    ESP_LOGI(TAG, "401 CHARGING IS STOPPED");
+                    display_error_msg(1, "CHARGING IS STOPPED");
+                    display_error_msg(0, "401");
                     break;
                 case 1:
-                    display_error_msg(1, "EMERGENCY SWITCH PRESSED");display_error_msg(0, "402");
-                    ESP_LOGI(TAG, "402 EMERGENCY SWITCH PRESSED");
+                    display_error_msg(1, "EMERGENCY SWITCH PRESSED");
+                    display_error_msg(0, "402");
                     break;
                 case 2:
-                    display_error_msg(1, "UNDER VOLTAGE");display_error_msg(0, "403");
-                    ESP_LOGI(TAG, "403 UNDER VOLTAGE");
+                    display_error_msg(1, "UNDER VOLTAGE");
+                    display_error_msg(0, "403");
                     break;
                 case 3:
-                    display_error_msg(1, "COMMUNICATION ERROR");display_error_msg(0, "404");
-                    ESP_LOGI(TAG, "404 COMMUNICATION ERROR");
+                    display_error_msg(1, "COMMUNICATION ERROR");
+                    display_error_msg(0, "404");
                     break;
                 case 4:
-                    display_error_msg(1, "CHARGER OVER TEMPERATURE");display_error_msg(0, "405");
-                    ESP_LOGI(TAG, "405 CHARGER OVER TEMPERATURE");
+                    display_error_msg(1, "CHARGER OVER TEMPERATURE");
+                    display_error_msg(0, "405");
                     break;
                 case 5:
-                    display_error_msg(1, "EARTH FAULT");display_error_msg(0, "406");
-                    ESP_LOGI(TAG, "406 EARTH FAULT");
+                    display_error_msg(1, "EARTH FAULT");
+                    display_error_msg(0, "406");
                     break;
                 case 6:
-                    display_error_msg(1, "CONTACTOR FAULT");display_error_msg(0, "407");
-                    ESP_LOGI(TAG, "407 CONTACTOR FAULT");
+                    display_error_msg(1, "CONTACTOR FAULT");
+                    display_error_msg(0, "407");
                     break;
                 case 7:
-                    display_error_msg(1, "RELAY WELD FAULT");display_error_msg(0, "408");
-                    ESP_LOGI(TAG, "408 RELAY WELD FAULT");
+                    display_error_msg(1, "RELAY WELD FAULT");
+                    display_error_msg(0, "408");
                     break;
                 case 8:
-                    display_error_msg(1, "CP ERROR");display_error_msg(0, "409");
-                    ESP_LOGI(TAG, "409 CP ERROR");
+                    display_error_msg(1, "CP ERROR");
+                    display_error_msg(0, "409");
                     break;
                 case 9:
-                    display_error_msg(1, "NETWORK ERROR");display_error_msg(0, "410");
-                    ESP_LOGI(TAG, "410 NETWORK ERROR");
+                    display_error_msg(1, "NETWORK ERROR");
+                    display_error_msg(0, "410");
                     break;
                 case 10:
-                    display_error_msg(1, "OVER VOLTAGE");display_error_msg(0, "411");
-                    ESP_LOGI(TAG, "411 OVER VOLTAGE");
+                    display_error_msg(1, "OVER VOLTAGE");
+                    display_error_msg(0, "411");
                     break;
                 default:
-                    display_error_msg(1, "UNKNOWN ERROR");display_error_msg(0, "412");
-                    ESP_LOGI(TAG, "412 UNKNOWN ERROR");
+                    display_error_msg(1, "UNKNOWN ERROR");
+                    display_error_msg(0, "412");
                     break;
             }
         }
     }
-    error_str_addr=ERR_STRING_ADDR;
-    error_num_addr=ERR_NUMBER_ADDR;
+    dwin_can_write(error_str_addr, DISPLAY_TERMINATOR);
+    dwin_can_write(error_num_addr, DISPLAY_TERMINATOR);
+    error_str_addr = ERR_STRING_ADDR;
+    error_num_addr = ERR_NUMBER_ADDR;
 }

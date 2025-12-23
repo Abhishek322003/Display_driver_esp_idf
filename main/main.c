@@ -10,15 +10,16 @@
 #include "esp_log.h"
 #include "energy_meter.h"
 #include "esp_modbus_master.h"
-#include "error.h"
 
 static const char *TAG = "MAIN";
 display_events_t main_event_1=CCS2_GUN_DISCONNECTED;
 display_feedback_t display_feedback_flag;
-esp_timer_handle_t timer_3sec;
+esp_timer_handle_t timer_5sec;
 volatile bool error_handler_flag=false;
-static bool start_charging_sent=false,unplugged_sent=false;
-volatile bool ccs2_gun_status_flag = false,ccs2_write_meter_flag=false,err_flag=false;
+static bool start_charging_sent=false;
+static bool unplugged_sent=false;
+volatile bool ccs2_gun_status_flag=false;
+bool err_flag=false;
 bool ccs2_error_screen_shown=false;
 
 
@@ -38,32 +39,17 @@ static void handle_ccs2_start_charging(void)
     if(display_feedback_flag.ccs2 && !display_feedback_flag.ccs2_t){
         ESP_LOGI(TAG,"Charging started");
         dwin_can_write(CCS2_GUN1_ADDR,STOP_CHARGING);
-        esp_timer_start_periodic(timer_3sec,5000000);
+       // esp_timer_start_periodic(timer_5sec,5000000);
         display_feedback_flag.ccs2_t=true;
         remove_hide(CCS2_SP_ADDR,CCS2_GUN1_S_STOP_ADDR);
     }
     if(!display_feedback_flag.ccs2 && display_feedback_flag.ccs2_t){
         ESP_LOGI(TAG,"Charging stopped");
-        esp_timer_stop(timer_3sec);
+        //esp_timer_stop(timer_5sec);
         display_feedback_flag.ccs2_t=false;
         dwin_can_write(CCS2_GUN1_ADDR,START_CHARGING);
         hide_data(CCS2_SP_ADDR);
     }
-}
-
-static void handle_ccs2_errors(void)
-{
-    if(!error_handler_flag) return;
-    if(ccs2_error_screen_shown) return;
-    switch_to_page(4);
-    dwin_can_write(CCS2_GUN1_ADDR,ERROR_SCREEN);
-    uint8_t i;
-    for(i=0;i<12;i++){
-        if((error_flags>>i)&1) break;
-    }
-    dwin_can_write(CCS2_GUN1_ERROR_ADDR,400+i);
-    write_error_msg();
-    ccs2_error_screen_shown=true;
 }
 
 static void handle_ccs2_unplugged(void)
@@ -72,7 +58,7 @@ static void handle_ccs2_unplugged(void)
     display_feedback_flag.ccs2=false;
     error_handler_flag=false;
     if(display_feedback_flag.ccs2_t){//handling the timer when it is unplugged
-        esp_timer_stop(timer_3sec);
+        //esp_timer_stop(timer_5sec);
         display_feedback_flag.ccs2_t=false;
         ESP_LOGI(TAG,"Error timer stopped");
     }
@@ -89,19 +75,20 @@ void ccs2_task(void *arg)
         if(ccs2_gun_status_flag){//if gun connected 
             handle_ccs2_connected();
             handle_ccs2_start_charging();
-            handle_ccs2_errors();
+           
         }else{
             handle_ccs2_unplugged();
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
-void timer_3sec_error_handler(){
+/*
+void timer_5sec_error_handler(){
     if(err_flag)
         error_handler_flag=true;
     else
         error_handler_flag=false;
-}
+}*/
 
 
 void handle_uart_gun_input(const char *cmd)
@@ -186,24 +173,23 @@ void uart_task(void *arg)
         }
     }
 }
-
+/*
 void create_timers(void)
 {
     const esp_timer_create_args_t ccs2_error_timer_args = {
-        .callback = timer_3sec_error_handler,
+        .callback = timer_5sec_error_handler,
         .arg = NULL,
         .dispatch_method = ESP_TIMER_TASK,  
         .name = "ccs2_timer"
     };
-    esp_timer_create(&ccs2_error_timer_args, &timer_3sec);
-}
+    esp_timer_create(&ccs2_error_timer_args, &timer_5sec);
+}*/
 
 void display_init(){
     uart_init();
-    create_timers();
+    //create_timers();
     can_network_init();
     dwin_init_pages();
-    //error_init();
     xTaskCreate(ccs2_task,"ccs2_gun1_task",4096,NULL,4,NULL);
     xTaskCreate(uart_task,"uart_task",4096,NULL,6,NULL);
     xTaskCreate(write_meter_task,"meter_task",4096,NULL,7,NULL);
@@ -213,7 +199,7 @@ void display_init(){
 void app_main(void)
 {
     display_init();
-    ESP_LOGI("MAIN","Function is running");   
+
 }
 
     
