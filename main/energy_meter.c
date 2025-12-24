@@ -9,13 +9,15 @@
 void *mb_ctx = 0;
 #define TAG "ENERGY_METER"
 
-static ac_meter_data_t ac_meter;
-static dc_meter_data_t dc_meter;
-void write_meter_task(){
-    while(1){
-        write_random_data_to_display();
-        vTaskDelay(10);
-    }
+//static ac_meter_data_t ac_meter;
+//static dc_meter_data_t dc_meter;
+
+static inline uint16_t float_to_u16(float v, float scale)
+{
+    if (v <= 0.0f) return 0;
+    v *= scale;
+    if (v > 65535.0f) return 65535;
+    return (uint16_t)(v + 0.5f); 
 }
 
 static float decodeFloat(uint16_t low, uint16_t high)
@@ -44,46 +46,37 @@ float read_float_id(uint8_t slave_id, uint16_t reg_start)
     return -9999.0f;   
 }
 
- void update_dc_meter(){
-    dc_meter.dc_voltage = read_float_id(DC_METER_SLAVE_ID, DC_REG_VOLT);
-    dc_meter.dc_current = read_float_id(DC_METER_SLAVE_ID, DC_REG_CURR);
-    dc_meter.dc_power   = read_float_id(DC_METER_SLAVE_ID, DC_REG_WATT);
-    dc_meter.dc_kwh     = read_float_id(DC_METER_SLAVE_ID, DC_REG_KWH);
-    ESP_LOGI(TAG,
-        "DC Meter -> V: %.2f V | I: %.2f A | P: %.2f W | E: %.2f kWh",
-        dc_meter.dc_voltage,
-        dc_meter.dc_current,
-        dc_meter.dc_power,
-        dc_meter.dc_kwh
-    );
-
+void update_dc_meter(){
+    dwin_can_write_float(CCS2_DEMAND_VOLTAGE ,read_float_id(DC_METER_SLAVE_ID,DC_REG_VOLT));
+    dwin_can_write_float(CCS2_DEMAND_CURRENT ,read_float_id(DC_METER_SLAVE_ID,DC_REG_CURR));
+    dwin_can_write_float(CCS2_ENERGY_DELIVERED,read_float_id(DC_METER_SLAVE_ID,DC_REG_KWH));
 }
- void update_ac_meter(){
-    ac_meter.L1_current = read_float_id(AC_METER_SLAVE_ID, AC_L1_CUR);
-    ac_meter.L2_current = read_float_id(AC_METER_SLAVE_ID, AC_L2_CUR);
-    ac_meter.L3_current = read_float_id(AC_METER_SLAVE_ID, AC_L3_CUR);
-    ac_meter.L1_voltage = read_float_id(AC_METER_SLAVE_ID, AC_L1_VOL);
-    ac_meter.L2_voltage = read_float_id(AC_METER_SLAVE_ID, AC_L2_VOL);
-    ac_meter.L3_voltage = read_float_id(AC_METER_SLAVE_ID, AC_L3_VOL);
-    ac_meter.avg_line_voltage = read_float_id(AC_METER_SLAVE_ID, AVG_LINE_VOL);
-    ac_meter.system_pf  = read_float_id(AC_METER_SLAVE_ID, SYSTEM_PF);
-    ESP_LOGI(TAG,
-        "AC Meter -> V(L1/L2/L3): %.1f / %.1f / %.1f V | I(L1/L2/L3): %.2f / %.2f / %.2f A | PF: %.2f",
-        ac_meter.L1_voltage,
-        ac_meter.L2_voltage,
-        ac_meter.L3_voltage,
-        ac_meter.L1_current,
-        ac_meter.L2_current,
-        ac_meter.L3_current,
-        ac_meter.system_pf
-    );
-
-}
-
-void push_energy_meter_data()
+ void update_ac_meter(void)
 {
+    dwin_can_write_float(CCS2_VOLTAGE_V1 ,read_float_id(AC_METER_SLAVE_ID,AC_L1_VOL ));
+    dwin_can_write_float(CCS2_VOLTAGE_V2 ,read_float_id(AC_METER_SLAVE_ID,AC_L2_VOL));
+    dwin_can_write_float(CCS2_VOLTAGE_V3 ,read_float_id(AC_METER_SLAVE_ID,AC_L3_VOL));
+    dwin_can_write_float(CCS2_AVG_VOLTAGE ,read_float_id(AC_METER_SLAVE_ID,AVG_LINE_VOL));
+
+    dwin_can_write_float(CCS2_CURRENT_I1 ,read_float_id(AC_METER_SLAVE_ID,AC_L1_CUR ));
+    dwin_can_write_float(CCS2_CURRENT_I2 ,read_float_id(AC_METER_SLAVE_ID,AC_L2_CUR));
+    dwin_can_write_float(CCS2_CURRENT_I3 ,read_float_id(AC_METER_SLAVE_ID,AC_L3_CUR));
+    dwin_can_write_float(CCS2_AVG_CURRENT ,read_float_id(AC_METER_SLAVE_ID,AVG_LINE_CUR));
+
+    dwin_can_write_float(CCS2_ACTIVE_POWER  ,read_float_id(AC_METER_SLAVE_ID,AC_ACTIVE_POWER));
+    dwin_can_write_float(CCS2_TOTAL_POWER ,read_float_id(AC_METER_SLAVE_ID,SYSTEM_PF));
+    dwin_can_write_float(CCS2_FREQUENCY ,read_float_id(AC_METER_SLAVE_ID,SYSTEM_FREQUENCY));
+    dwin_can_write_float(CCS2_AVG_PF ,read_float_id(AC_METER_SLAVE_ID,AC_L1_PF));
+}
+
+
+void push_energy_meter_data(void *arg)
+{
+    while(1){
     update_ac_meter();
     update_dc_meter();
+    vTaskDelay(100);
+    }
 }
 
 void energy_meter_init(void){
@@ -100,17 +93,54 @@ void energy_meter_init(void){
     ESP_ERROR_CHECK(mbc_master_create_serial(&comm, &mb_ctx));
     ESP_ERROR_CHECK(uart_set_pin(MB_PORT_NUM, MODBUS_TX_PIN, MODBUS_RX_PIN, MODBUS_RE_DE_PIN, UART_PIN_NO_CHANGE));
     ESP_ERROR_CHECK(mbc_master_start(mb_ctx));
-    ESP_LOGI(TAG, "Modbus Master Started (DC METER Slave ID 0x24)");
-   
+    ESP_LOGI(TAG, "Modbus Master Started DC METER Slave ID 0x24 and AC METER SLAVE ID 10");
+    xTaskCreate(push_energy_meter_data,"push_energy_meter",4096,NULL,7,NULL);
 }
 void write_random_data_to_display()
 {
     uint16_t addr;
-    for (addr = 0x1500; addr <= 0x1555; addr += 5)
-    {
+    for (addr = 0x1500; addr <= 0x1555; addr += 5){
         uint16_t random_data = rand() % 10000;  // random 0–9999
         dwin_can_hide_write(addr,random_data);
         vTaskDelay(10);
     }
 }
-    
+
+
+void dwin_can_write_float(uint16_t vp_addr, float value)
+{   
+    uint32_t raw;
+    memcpy(&raw, &value, sizeof(raw));
+    uint16_t high = (raw >> 16) & 0xFFFF;
+    uint16_t low  = raw & 0xFFFF;
+    dwin_can_write(vp_addr,high);
+    dwin_can_write(vp_addr+1,low);
+    ESP_LOGI(TAG,"[TX-FLOAT] VP=0x%04X -> MSG->highx%2x lowx%2x and value %.3f\n", vp_addr,high,low, value);
+}
+
+void reset_energy_meter(void)
+{
+    mb_param_request_t req = {
+        .command   = 0x06,   
+        .reg_start = DC_REG_RST ,    
+        .reg_size  = 1
+    };
+    uint16_t reset_value = METER_RST_VALUE;
+    esp_err_t err;
+    req.slave_addr = DC_METER_SLAVE_ID;
+    err = mbc_master_send_request(mb_ctx, &req, &reset_value);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "DC Meter kWh reset successful");
+    } else {
+        ESP_LOGE(TAG, "DC Meter reset failed, err=0x%x", err);
+    }
+    req.reg_start=AC_REG_RST;
+    req.slave_addr = AC_METER_SLAVE_ID;
+    err = mbc_master_send_request(mb_ctx, &req, &reset_value);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "AC Meter kWh reset successful");
+    } else {
+        ESP_LOGE(TAG, "AC Meter reset failed, err=0x%x", err);
+    }
+}
+

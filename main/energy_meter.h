@@ -28,14 +28,14 @@ typedef enum {
 #define CCS2_VOLTAGE_V2         0x1605
 #define CCS2_VOLTAGE_V3         0x160A
 #define CCS2_AVG_VOLTAGE        0x160F
-#define CCS2_FREQUENCY          0x1614
-#define CCS2_AVG_PF             0x1619
 #define CCS2_CURRENT_I1         0x161E
 #define CCS2_CURRENT_I2         0x1623
 #define CCS2_CURRENT_I3         0x1628
 #define CCS2_AVG_CURRENT        0x162D
 #define CCS2_ACTIVE_POWER       0x1632
 #define CCS2_TOTAL_POWER        0x1637
+#define CCS2_FREQUENCY          0x1614
+#define CCS2_AVG_PF             0x1619
 
 
     
@@ -51,6 +51,8 @@ typedef enum {
 #define DC_REG_VOLT        4
 #define DC_REG_CURR        6
 #define DC_REG_WATT        8
+#define DC_REG_RST         16
+#define METER_RST_VALUE     15
 //ac_meter registers
 #define AC_L1_VOL         20
 #define AC_L2_VOL         24
@@ -65,36 +67,40 @@ typedef enum {
 #define AC_L3_PF 72
 #define SYSTEM_PF 76
 #define SYSTEM_FREQUENCY 78
-#define active_power 92
+#define AC_ACTIVE_POWER 92
+#define AC_REG_RST  178
+/*
 typedef struct
 {
-    float dc_kwh;     
-    float dc_voltage;
-    float dc_current;
-    float dc_power;  
+    uint16_t dc_kwh;     
+    uint16_t dc_voltage;
+    uint16_t dc_current;
+    uint16_t dc_power;  
 
 } dc_meter_data_t;
 typedef struct
 {
-    float L1_voltage;
-    float L2_voltage;
-    float L3_voltage;
-    float avg_line_voltage;
-    float L1_current;
-    float L2_current;
-    float L3_current;
-    float avg_line_current;
-    float L1_pf;
-    float L2_pf;
-    float L3_pf;
-    float system_pf;
-
+    uint16_t l1_voltage;       
+    uint16_t l2_voltage;       
+    uint16_t l3_voltage;       
+    uint16_t avg_line_voltage; 
+    uint16_t l1_current;       
+    uint16_t l2_current;      
+    uint16_t l3_current;      
+    uint16_t avg_line_current;
+    uint16_t l1_pf;            
+    uint16_t l2_pf;            
+    uint16_t l3_pf;            
+    uint16_t system_pf;       
 } ac_meter_data_t;
+*/
 
 void energy_meter_init(void);
-float read_float_id(uint8_t slave_id, uint16_t reg_start);
-void push_energy_meter_data();
-void write_random_data_to_display();
-void write_meter_task();
+//float read_float_id(uint8_t slave_id, uint16_t reg_start);
+void push_energy_meter_data(void *arg);
+//void write_random_data_to_display();
+//void write_meter_task();
+//void update_dc_meter();
+void dwin_can_write_float(uint16_t vp_addr, float value);
 
 #endif

@@ -6,11 +6,12 @@
 #include "esp_event.h"
 #include "esp_timer.h"
 ESP_EVENT_DECLARE_BASE(DISPLAY_EVENT);
+extern uint32_t timer_addr_data;
 extern uint16_t error_flags;
 extern uint16_t display_feedback;
 extern volatile bool ccs2_gun_status_flag;
 extern uint16_t error_flags ;
-extern esp_timer_handle_t timer_5sec;
+extern esp_timer_handle_t timer_3sec;
 #define ERR_STRING_ADDR 0X1900
 #define ERR_NUMBER_ADDR 0X1800
 #define UART_NUM         UART_NUM_0
@@ -65,6 +66,20 @@ extern esp_timer_handle_t timer_5sec;
 #define ERR_NETWORK_FAULT (1<<9)
 #define ERR_OVER_VOLTAGE (1<<10)
 
+typedef enum {
+    CHARGING_IS_STOPPED=1,
+    EMERGENCY_SWITCH,
+    UNDER_VOLTAGE,
+    COMMUNICATION_ERROR,
+    CHARGER_OVER_TEMPERATURE,
+    EARTH_FAULT,
+    CONTACTOR_FAULT,
+    RELAY_WELD_FAULT,
+    CP_ERROR,
+    NETWORK_ERROR,
+    OVER_VOLTAGE,
+}error_events_t ;
+
 typedef enum{
     CCS2_GUN_CONNECTED,
     CCS2_GUN_DISCONNECTED,
@@ -83,7 +98,7 @@ typedef enum{
 } display_events_t;
 
 typedef struct {
-    uint16_t value;
+    float value;
 } display_req_data_t;
 
 typedef struct{
@@ -96,22 +111,16 @@ extern display_feedback_t display_feedback_flag;
 
 extern can_msg_t read_display;
 extern can_msg_t write_display;
-
-void uart_init();
+void ccs2_task(void *arg);
+void uart_task(void *arg);
 void send_display_event(void* event);
 void send_display_value_event(display_events_t event, uint16_t value);
-void dwin_init_pages(void);
 void write_error_msg(void);
-uint16_t dwin_can_read(uint16_t addr);
 void dwin_can_write(uint16_t addr, uint16_t value);
-void display_error_msg(bool addr_flag,const char *error_data);
 void switch_to_page(uint8_t page_number);
-void clear_screen(uint16_t addr);
 void dwin_can_hide_write(uint16_t addr,uint16_t random_data);
 void display_event_handler(void *arg,esp_event_base_t base,int32_t event_id,void* event_data);
 void dwin_can_rx_handler(const can_msg_t *msg);
-void hide_data(uint16_t sp_addr);
-void remove_hide(uint16_t sp_addr,uint16_t vp_addr);
 void display_init();
-
+void create_timers(uint16_t addr,uint16_t data);
 #endif
