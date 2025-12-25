@@ -10,14 +10,26 @@
 #include "esp_log.h"
 #include "energy_meter.h"
 #include "esp_modbus_master.h"
+void uart_task(void *arg);
+#define UART_NUM         UART_NUM_0
+#define UART_BUF_SIZE    128
 
 static const char *TAG = "MAIN";
 
 display_events_t main_event_1=CCS2_GUN_DISCONNECTED;
 esp_timer_handle_t timer_3sec;
 
-
-
+static void uart_init(){
+    uart_config_t uart_conf = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
+    uart_driver_install(UART_NUM, UART_BUF_SIZE*2, 0, 0, NULL, 0);
+    uart_param_config(UART_NUM, &uart_conf);
+}
 
 void handle_uart_gun_input(const char *cmd)
 {
@@ -39,6 +51,7 @@ void handle_uart_gun_input(const char *cmd)
     send_display_event(&main_event_1);
     ESP_LOGI(TAG, "Gun Event Sent: %s", cmd);
 }
+
 void handle_uart_error_input(char *cmd)
 {
     char *token = strtok(cmd + 1, " ");
@@ -54,7 +67,6 @@ void handle_uart_error_input(char *cmd)
         token = strtok(NULL, " ");
     }
 }
-
 
 void uart_task(void *arg)
 {
@@ -105,7 +117,12 @@ void uart_task(void *arg)
 void app_main(void)
 {
     can_network_init();
+    uart_init();
+    //energy_meter_init();
     display_init();
+    xTaskCreate(uart_task,"uart_task",4096,NULL,6,NULL);
+    
+
 }
 
     

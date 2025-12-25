@@ -5,12 +5,8 @@
 #include "nvs_flash.h"
 #include "driver/gpio.h"
 #include "display.h"
-
 void *mb_ctx = 0;
 #define TAG "ENERGY_METER"
-
-//static ac_meter_data_t ac_meter;
-//static dc_meter_data_t dc_meter;
 
 static inline uint16_t float_to_u16(float v, float scale)
 {
@@ -27,7 +23,8 @@ static float decodeFloat(uint16_t low, uint16_t high)
     memcpy(&f, &raw, sizeof(f));
     return f;
 }
-float read_float_id(uint8_t slave_id, uint16_t reg_start)
+
+static float read_float_id(uint8_t slave_id, uint16_t reg_start)
 {
     mb_param_request_t req = {
         .slave_addr = slave_id,
@@ -46,12 +43,13 @@ float read_float_id(uint8_t slave_id, uint16_t reg_start)
     return -9999.0f;   
 }
 
-void update_dc_meter(){
+static void update_dc_meter(){
     dwin_can_write_float(CCS2_DEMAND_VOLTAGE ,read_float_id(DC_METER_SLAVE_ID,DC_REG_VOLT));
     dwin_can_write_float(CCS2_DEMAND_CURRENT ,read_float_id(DC_METER_SLAVE_ID,DC_REG_CURR));
     dwin_can_write_float(CCS2_ENERGY_DELIVERED,read_float_id(DC_METER_SLAVE_ID,DC_REG_KWH));
 }
- void update_ac_meter(void)
+
+static void update_ac_meter(void)
 {
     dwin_can_write_float(CCS2_VOLTAGE_V1 ,read_float_id(AC_METER_SLAVE_ID,AC_L1_VOL ));
     dwin_can_write_float(CCS2_VOLTAGE_V2 ,read_float_id(AC_METER_SLAVE_ID,AC_L2_VOL));
@@ -69,8 +67,7 @@ void update_dc_meter(){
     dwin_can_write_float(CCS2_AVG_PF ,read_float_id(AC_METER_SLAVE_ID,AC_L1_PF));
 }
 
-
-void push_energy_meter_data(void *arg)
+static void push_energy_meter_data(void *arg)
 {
     while(1){
     update_ac_meter();
@@ -79,46 +76,17 @@ void push_energy_meter_data(void *arg)
     }
 }
 
-void energy_meter_init(void){
-    nvs_flash_init();
-    gpio_set_direction((gpio_num_t)MODBUS_RE_DE_PIN, GPIO_MODE_OUTPUT);
-    gpio_set_level((gpio_num_t)MODBUS_RE_DE_PIN, 0);  
-    mb_communication_info_t comm = {};
-    comm.mode = MB_PORT_SERIAL_MASTER;
-    comm.ser_opts.port = MB_PORT_NUM;
-    comm.ser_opts.baudrate = MODBUS_BAUDRATE;
-    comm.ser_opts.parity = UART_PARITY_DISABLE;
-    comm.ser_opts.data_bits = UART_DATA_8_BITS;
-    comm.ser_opts.stop_bits = UART_STOP_BITS_1;
-    ESP_ERROR_CHECK(mbc_master_create_serial(&comm, &mb_ctx));
-    ESP_ERROR_CHECK(uart_set_pin(MB_PORT_NUM, MODBUS_TX_PIN, MODBUS_RX_PIN, MODBUS_RE_DE_PIN, UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(mbc_master_start(mb_ctx));
-    ESP_LOGI(TAG, "Modbus Master Started DC METER Slave ID 0x24 and AC METER SLAVE ID 10");
-    xTaskCreate(push_energy_meter_data,"push_energy_meter",4096,NULL,7,NULL);
-}
-void write_random_data_to_display()
+static void write_random_data_to_display()
 {
     uint16_t addr;
     for (addr = 0x1500; addr <= 0x1555; addr += 5){
         uint16_t random_data = rand() % 10000;  // random 0–9999
-        dwin_can_hide_write(addr,random_data);
+        //dwin_can_hide_write(addr,random_data);
         vTaskDelay(10);
     }
 }
 
-
-void dwin_can_write_float(uint16_t vp_addr, float value)
-{   
-    uint32_t raw;
-    memcpy(&raw, &value, sizeof(raw));
-    uint16_t high = (raw >> 16) & 0xFFFF;
-    uint16_t low  = raw & 0xFFFF;
-    dwin_can_write(vp_addr,high);
-    dwin_can_write(vp_addr+1,low);
-    ESP_LOGI(TAG,"[TX-FLOAT] VP=0x%04X -> MSG->highx%2x lowx%2x and value %.3f\n", vp_addr,high,low, value);
-}
-
-void reset_energy_meter(void)
+static void reset_energy_meter(void)
 {
     mb_param_request_t req = {
         .command   = 0x06,   
@@ -144,3 +112,20 @@ void reset_energy_meter(void)
     }
 }
 
+void energy_meter_init(void){
+    nvs_flash_init();
+    gpio_set_direction((gpio_num_t)MODBUS_RE_DE_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)MODBUS_RE_DE_PIN, 0);  
+    mb_communication_info_t comm = {};
+    comm.mode = MB_PORT_SERIAL_MASTER;
+    comm.ser_opts.port = MB_PORT_NUM;
+    comm.ser_opts.baudrate = MODBUS_BAUDRATE;
+    comm.ser_opts.parity = UART_PARITY_DISABLE;
+    comm.ser_opts.data_bits = UART_DATA_8_BITS;
+    comm.ser_opts.stop_bits = UART_STOP_BITS_1;
+    ESP_ERROR_CHECK(mbc_master_create_serial(&comm, &mb_ctx));
+    ESP_ERROR_CHECK(uart_set_pin(MB_PORT_NUM, MODBUS_TX_PIN, MODBUS_RX_PIN, MODBUS_RE_DE_PIN, UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(mbc_master_start(mb_ctx));
+    ESP_LOGI(TAG, "Modbus Master Started DC METER Slave ID 0x24 and AC METER SLAVE ID 10");
+    xTaskCreate(push_energy_meter_data,"push_energy_meter",4096,NULL,7,NULL);
+}

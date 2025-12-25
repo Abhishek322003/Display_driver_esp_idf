@@ -9,229 +9,112 @@
 #include "driver/uart.h"
 #include "energy_meter.h"
 #include "esp_modbus_master.h"
-uint16_t error_flags;
-const char *TAG="DISPLAY";
-display_feedback_t display_feedback_flag;
-uint32_t timer_addr_data;
-//esp_timer_handle_t timer_5sec;
-volatile bool error_handler_flag=false;
-static bool start_charging_sent=false;
-static bool unplugged_sent=false;
-volatile bool ccs2_gun_status_flag=false;
-bool err_flag=false;
-bool ccs2_error_screen_shown=false;
-static uint16_t error_str_addr=ERR_STRING_ADDR;
-static uint16_t error_num_addr=ERR_NUMBER_ADDR;
+#include "can_network.h"
+//MACROS
+#define ERR_STRING_ADDR 0X1900
+#define ERR_NUMBER_ADDR 0X1800
+//DISPLAY
+#define PAGE_SWITCH_ADDR        0x0085
+#define PAGE_SWITCH_INITADDR    0x0084
+#define DWIN_READ_ID            0x0100
+#define DWIN_WRITE_ID           0x0100
+#define READ_CMD                0x83
+#define WRITE_CMD               0x82
+#define LINE_BREAK_ADDR 0x5020
+#define LINE_BREAK_DATA 0x0D0A
+#define DISPLAY_HEADER 0X5000
+//COMMON
+#define UNPLUGGED 1
+#define PLUGGED 2
+#define START_CHARGING 3
+#define STOP_CHARGING 4
+#define ERROR_SCREEN 5
+//GUN1
+#define CCS2_SP_ADDR 0X9000
+#define CCS2_GUN1_ADDR 0X1000
+#define CCS2_GUN1_S_STOP_ADDR  0x1100
+#define CCS2_GUN1_ERROR_ADDR 0X1050
+//GUN2
+#define GUN2_SP_ADDR 0X8000
+#define TYPE6_GUN2_ADDR 0X2000
+#define TYPE6_GUN2_S_STOP_ADDR 0X2100
+//GUN3
+#define AC_SOCKET_ADDR 0X3000 
+#define AC_SP_ADDR 0X7000
+///CCS2 GUN1 ADDRESES 
+#define CCS2_ADDR_LOWER  0X1500
+#define CCS2_ADDR_UPPER 0X1555
+#define DISPLAY_TERMINATOR 0XFFFF
+//ERROR_FLAGS
+#define ERR_CHARGE_STOPPED (1<<0)
+#define ERR_EMERGENCY_STOP (1<<1)
+#define ERR_UNDER_VOLTAGE   (1<<2)
+#define ERR_COMMUNICATION (1<<3)
+#define ERR_CHARGER_OVER_TEMPERATURE (1<<4)
+#define ERR_EARTH_FAULT  (1<<5)
+#define ERR_CONTACTOR_FAULT (1<<6)
+#define ERR_RELAY_WELD_FAULT (1<<7)
+#define ERR_CP_INVALID (1<<8)
+#define ERR_NETWORK_FAULT (1<<9)
+#define ERR_OVER_VOLTAGE (1<<10)
 
 ESP_EVENT_DEFINE_BASE(DISPLAY_EVENT);
+ESP_EVENT_DEFINE_BASE(TIMER_EVENT);
+static uint16_t error_flags;
+static const char *TAG="DISPLAY";
+static esp_timer_handle_t timer_3sec;
+static uint32_t timer_addr_data;
+static uint16_t error_str_addr=ERR_STRING_ADDR;
+static uint16_t error_num_addr=ERR_NUMBER_ADDR;
 static esp_event_loop_handle_t display_event_loop = NULL;
-
-can_msg_t read_display = {
+static esp_event_loop_handle_t display_timer_event_loop=NULL;
+static can_msg_t read_display = {
     .id = DWIN_READ_ID,
     .dlc = 8,
     .buff = {0x06, READ_CMD, 0x00, 0x00, 0x00, 0x00}
 };
-
-can_msg_t write_display = {
+static can_msg_t write_display = {
     .id = DWIN_WRITE_ID,
     .dlc = 6,
     .buff = {0x05, WRITE_CMD, 0x00, 0x00, 0x00, 0x00}
 };
-void timer_3sec_error_handler(void *addr_data);
 
-esp_timer_create_args_t ccs2_timer_args = {
-        .callback = timer_3sec_error_handler,
+static void set_the_error_flag(uint16_t value);
+static void timer_3sec_handler(void *addr_data);
+static void create_timer(uint16_t addr,uint16_t data);
+static void switch_to_page(uint8_t page_number);
+static void write_error_msg();
+static void display_timer_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data);
+static void display_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data);
+
+static esp_timer_create_args_t ccs2_timer_args = {
+        .callback = timer_3sec_handler,
         .arg = &timer_addr_data,
         .dispatch_method = ESP_TIMER_TASK,  
         .name = "ccs2_timer"
     };
 
-void timer_3sec_error_handler(void *addr_data){
-    uint32_t packed = *(uint32_t *)addr_data;
-    uint16_t addr = (packed >> 16) & 0xFFFF;
-    uint16_t data = packed & 0xFFFF;
-    dwin_can_write(addr, data);
-    ESP_LOGI(TAG,"TIMER ENDED ONLY ONCE %x",packed);
-}
-
-    
-void create_timers(uint16_t addr,uint16_t data)
+static void display_timer_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data)
 {
-    timer_addr_data = ((uint32_t)(addr & 0xFFFF) << 16) | (data & 0xFFFF);
-    ESP_LOGI(TAG,"timer addr:%4x %2x %2x",timer_addr_data,addr,data);
-    esp_timer_create(&ccs2_timer_args, &timer_3sec);
-}
+	(void)arg;
+	(void)base;
+	display_timer_events_t event = (display_timer_events_t)event_id;
+	switch (event) {
+	case DEFAULT:
+        switch_to_page(8);
+        ESP_LOGI(TAG,"PAGE8 EVENT");
+		break;
+    case PAGE1:
+    case PAGE2:
+    case PAGE8:
+    case HOME_SCREEN:
+        ESP_LOGI(TAG,"PAGE1");
+		break;
 
-
-
-
-static void hide_data(uint16_t addr){
-    dwin_can_write(addr,0xff00);//0xff00 to hide the data 
-}
-static void remove_hide(uint16_t addr,uint16_t vp_addr){
-    dwin_can_write(addr,vp_addr);
-}
-
-
-static void display_error_msg(bool error_addr_flag, const char *error_data)
-{
-    uint16_t error_addr=0;
-    uint8_t inc=0;
-    if(error_addr_flag){
-        error_addr=error_str_addr;
-    }
-    else{
-        error_addr=error_num_addr;
-    }
-    while (*error_data && (*(error_data + 1)))
-    {
-        uint16_t send_data = *error_data<<8;//ABCD
-        error_data++;
-        send_data |= *error_data;
-        dwin_can_write(error_addr + inc, send_data);//ABHISHEK
-        error_data++;
-        inc++;
-    }
-    if(*error_data){
-        uint16_t space=*error_data<<8|0x20;
-        dwin_can_write(error_addr+inc,space);
-        inc++;
-    }
-     dwin_can_write(error_addr+inc,LINE_BREAK_DATA);
-     inc++;
-     if(error_addr_flag){
-       error_str_addr=error_addr+inc;
-       ESP_LOGI(TAG, "%x erroraddr",error_str_addr);
-     }
-    else{
-       error_num_addr=error_addr+inc;
-       ESP_LOGI(TAG, "%x erroraddr",error_num_addr);
     }
 }
 
-
-static void handle_ccs2_connected(void)
-{
-    unplugged_sent=false;
-    if(!start_charging_sent){
-        dwin_can_write(CCS2_GUN1_ADDR,PLUGGED);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-        //create_timers(CCS2_GUN1_ADDR,START_CHARGING);
-        //esp_timer_start_once(timer_3sec,2000000);
-        dwin_can_write(CCS2_GUN1_ADDR,START_CHARGING);
-        ESP_LOGI(TAG,"START CHARGING screen shown");
-        start_charging_sent=true;//executes only once
-    }
-}
-static void handle_ccs2_start_charging(void)
-{
-    if(display_feedback_flag.ccs2 && !display_feedback_flag.ccs2_t){
-        ESP_LOGI(TAG,"Charging started");
-        dwin_can_write(CCS2_GUN1_ADDR,STOP_CHARGING);
-       // esp_timer_start_periodic(timer_5sec,5000000);
-        display_feedback_flag.ccs2_t=true;
-        remove_hide(CCS2_SP_ADDR,CCS2_GUN1_S_STOP_ADDR);
-    }
-    if(!display_feedback_flag.ccs2 && display_feedback_flag.ccs2_t){
-        ESP_LOGI(TAG,"Charging stopped");
-        //esp_timer_stop(timer_5sec);
-        display_feedback_flag.ccs2_t=false;
-        dwin_can_write(CCS2_GUN1_ADDR,START_CHARGING);
-        hide_data(CCS2_SP_ADDR);
-    }
-}
-
-static void handle_ccs2_unplugged(void)
-{
-    start_charging_sent=false;
-    display_feedback_flag.ccs2=false;
-    error_handler_flag=false;
-    if(display_feedback_flag.ccs2_t){//handling the timer when it is unplugged
-        //esp_timer_stop(timer_5sec);
-        display_feedback_flag.ccs2_t=false;
-        ESP_LOGI(TAG,"Error timer stopped");
-    }
-    if(!unplugged_sent){//writing only once 
-        dwin_can_write(CCS2_GUN1_ADDR,UNPLUGGED);
-        ESP_LOGI(TAG,"UNPLUGGED screen shown");
-        unplugged_sent=true;
-        hide_data(CCS2_SP_ADDR);
-    }
-}
-
-void ccs2_task(void *arg)
-{
-    while(1){
-        if(ccs2_gun_status_flag){//if gun connected 
-            handle_ccs2_connected();
-            handle_ccs2_start_charging();
-           
-        }else{
-            handle_ccs2_unplugged();
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-}
-
-static void uart_init(){
-    uart_config_t uart_conf = {
-        .baud_rate = 115200,
-        .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
-    };
-    uart_driver_install(UART_NUM, UART_BUF_SIZE*2, 0, 0, NULL, 0);
-    uart_param_config(UART_NUM, &uart_conf);
-}
-
-static void set_the_error_flag(uint16_t value){
-    error_events_t number=(error_events_t)value;
-    if (number<= OVER_VOLTAGE && number >=CHARGING_IS_STOPPED) {
-		if (value ==CHARGING_IS_STOPPED ) {
-			error_flags |= ERR_CHARGE_STOPPED;//1
-		}
-		else if (value == EMERGENCY_SWITCH) {
-			error_flags |= ERR_EMERGENCY_STOP;//2
-		}
-		else if (value == UNDER_VOLTAGE) {
-			error_flags |= ERR_UNDER_VOLTAGE;//4
-		}
-		else if (value == COMMUNICATION_ERROR) {
-			error_flags |= ERR_COMMUNICATION;//8
-		}
-		else if (value == CHARGER_OVER_TEMPERATURE) {
-			error_flags |= ERR_CHARGER_OVER_TEMPERATURE;//12
-		}
-		else if (value == EARTH_FAULT) {
-			error_flags |= ERR_EARTH_FAULT;
-		}
-		else if (value == CONTACTOR_FAULT) {
-			error_flags |= ERR_CONTACTOR_FAULT;
-		}
-		else if (value == RELAY_WELD_FAULT) {
-			error_flags |= ERR_RELAY_WELD_FAULT;
-		}
-		else if (value == CP_ERROR) {
-			error_flags |= ERR_CP_INVALID;
-		}
-		else if (value == NETWORK_ERROR) {
-			error_flags |= ERR_NETWORK_FAULT;
-		}
-		else if (value == OVER_VOLTAGE) {
-			error_flags |= ERR_OVER_VOLTAGE;
-		}
-        write_error_msg();
-	}
-	else {
-		ESP_LOGW(TAG, "Invalid error index: %d", value);
-        return;
-	}
-
-
-}
-
-void display_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data)
+static void display_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data)
 {
 	(void)arg;
 	(void)base;
@@ -243,15 +126,19 @@ void display_event_handler(void *arg, esp_event_base_t base, int32_t event_id, v
 		return;
 	}
 	display_req_data_t *data = (display_req_data_t *)event_data;
+    uint16_t num=data->value%100;
+    uint16_t num1=data->value/100;
+    float f_data=num+(((float)num1/100));
 	switch (event) {
-
 	case CCS2_GUN_CONNECTED:
-		ccs2_gun_status_flag = true;
+        dwin_can_write(CCS2_GUN1_ADDR,PLUGGED);
+        create_timer(CCS2_GUN1_ADDR,START_CHARGING);
+        timer_addr_data = ((uint32_t)(CCS2_GUN1_ADDR & 0xFFFF) << 16) | (START_CHARGING & 0xFFFF);
+        esp_timer_start_once(timer_3sec,300000);
+        ESP_LOGI(TAG,"3sec timer staarted");
 		break;
-
 	case CCS2_GUN_DISCONNECTED:
 		dwin_can_write(CCS2_GUN1_ADDR, UNPLUGGED);
-		ccs2_gun_status_flag = false;
 		break;
 
 	case GUN2_TYPE6_CONNECTED:
@@ -309,6 +196,123 @@ void display_event_handler(void *arg, esp_event_base_t base, int32_t event_id, v
 	}
 }
 
+static inline void hide_data(uint16_t addr){
+    dwin_can_write(addr,0xff00);//0xff00 to hide the data 
+}
+
+static inline void remove_hide(uint16_t addr,uint16_t vp_addr){
+    dwin_can_write(addr,vp_addr);
+}
+
+static void timer_3sec_handler(void *addr_data){
+    uint32_t packed = *(uint32_t *)addr_data;
+    uint16_t addr = (packed >> 16) & 0xFFFF;
+    uint16_t data = packed & 0xFFFF;
+    dwin_can_write(addr, data);
+    ESP_LOGI(TAG,"TIMER ENDED ONLY ONCE %x",packed);
+    esp_event_post_to(display_timer_event_loop,TIMER_EVENT,DEFAULT,NULL,0, 0);
+}
+ 
+static void create_timer(uint16_t addr,uint16_t data)
+{
+    timer_addr_data = ((uint32_t)(addr & 0xFFFF) << 16) | (data & 0xFFFF);
+    esp_timer_create(&ccs2_timer_args, &timer_3sec);
+}
+
+static void display_error_msg(bool error_addr_flag, const char *error_data)
+{
+    uint16_t error_addr=0;
+    uint8_t inc=0;
+    if(error_addr_flag){
+        error_addr=error_str_addr;
+    }
+    else{
+        error_addr=error_num_addr;
+    }
+    while (*error_data && (*(error_data + 1)))
+    {
+        uint16_t send_data = *error_data<<8;//ABCD
+        error_data++;
+        send_data |= *error_data;
+        dwin_can_write(error_addr + inc, send_data);//ABHISHEK
+        error_data++;
+        inc++;
+    }
+    if(*error_data){
+        uint16_t space=*error_data<<8|0x20;
+        dwin_can_write(error_addr+inc,space);
+        inc++;
+    }
+     dwin_can_write(error_addr+inc,LINE_BREAK_DATA);
+     inc++;
+     if(error_addr_flag){
+       error_str_addr=error_addr+inc;
+       ESP_LOGI(TAG, "%x erroraddr",error_str_addr);
+     }
+    else{
+       error_num_addr=error_addr+inc;
+       ESP_LOGI(TAG, "%x erroraddr",error_num_addr);
+    }
+}
+
+static void set_the_error_flag(uint16_t value){
+    error_events_t number=(error_events_t)value;
+    if (number<= OVER_VOLTAGE && number >=CHARGING_IS_STOPPED) {
+		if (value ==CHARGING_IS_STOPPED ) {
+			error_flags |= ERR_CHARGE_STOPPED;//1
+		}
+		else if (value == EMERGENCY_SWITCH) {
+			error_flags |= ERR_EMERGENCY_STOP;//2
+		}
+		else if (value == UNDER_VOLTAGE) {
+			error_flags |= ERR_UNDER_VOLTAGE;//4
+		}
+		else if (value == COMMUNICATION_ERROR) {
+			error_flags |= ERR_COMMUNICATION;//8
+		}
+		else if (value == CHARGER_OVER_TEMPERATURE) {
+			error_flags |= ERR_CHARGER_OVER_TEMPERATURE;//12
+		}
+		else if (value == EARTH_FAULT) {
+			error_flags |= ERR_EARTH_FAULT;
+		}
+		else if (value == CONTACTOR_FAULT) {
+			error_flags |= ERR_CONTACTOR_FAULT;
+		}
+		else if (value == RELAY_WELD_FAULT) {
+			error_flags |= ERR_RELAY_WELD_FAULT;
+		}
+		else if (value == CP_ERROR) {
+			error_flags |= ERR_CP_INVALID;
+		}
+		else if (value == NETWORK_ERROR) {
+			error_flags |= ERR_NETWORK_FAULT;
+		}
+		else if (value == OVER_VOLTAGE) {
+			error_flags |= ERR_OVER_VOLTAGE;
+		}
+        write_error_msg();
+	}
+	else {
+		ESP_LOGW(TAG, "Invalid error index: %d", value);
+        return;
+	}
+
+
+}
+
+void send_display_timer_event(void* event){
+   display_timer_events_t ev=*(display_timer_events_t *)event;
+    esp_event_post_to(
+        display_timer_event_loop,
+        TIMER_EVENT,
+        ev,
+        NULL,
+        0,
+        0
+    );
+}
+
 void send_display_event(void* event){
     display_events_t ev=*(display_events_t *)event;
     esp_event_post_to(
@@ -335,7 +339,7 @@ void send_display_value_event(display_events_t event, uint16_t value){
     );
 }
 
-void switch_to_page(uint8_t page_number)
+static void switch_to_page(uint8_t page_number)
 {
     dwin_can_write(PAGE_SWITCH_ADDR, page_number);
     dwin_can_write(PAGE_SWITCH_INITADDR, 0x5A01);
@@ -366,9 +370,34 @@ static void display_event_loop_init(void)
     ESP_LOGI(TAG, "Display event loop created");
 }
 
+static void display_timer_event_loop_init(void)
+{
+    esp_event_loop_args_t display_timer_loop_args = {
+        .queue_size = 10,
+        .task_name = "timer_task",
+        .task_priority = 6,
+        .task_stack_size = 4096,
+        .task_core_id = tskNO_AFFINITY
+    };
+
+    ESP_ERROR_CHECK(esp_event_loop_create(&display_timer_loop_args, &display_timer_event_loop));
+
+    ESP_ERROR_CHECK(
+        esp_event_handler_register_with(
+            display_timer_event_loop,
+            TIMER_EVENT,
+            ESP_EVENT_ANY_ID,
+            display_timer_event_handler,
+            NULL
+        )
+    );
+    ESP_LOGI(TAG, "display timer event loop created");
+}
+
 static void reset_display(){
-    can_network_register_rx_cb(TWAI_CAN, dwin_can_rx_handler);
+    switch_to_page(0);//home screen
     dwin_can_write(CCS2_GUN1_ADDR,UNPLUGGED);
+    dwin_can_write(CCS2_GUN1_S_STOP_ADDR,0);
     dwin_can_write(TYPE6_GUN2_ADDR,UNPLUGGED);
     dwin_can_write(AC_SOCKET_ADDR,UNPLUGGED);
     dwin_can_write(DISPLAY_HEADER,1);
@@ -377,43 +406,28 @@ static void reset_display(){
     hide_data(AC_SP_ADDR);
 }
 
-
-void dwin_can_hide_write(uint16_t addr, uint16_t value){
+void dwin_can_write(uint16_t addr, uint16_t value){
     write_display.buff[2] = (addr >> 8) & 0xFF;
     write_display.buff[3] = addr & 0xFF;
     write_display.buff[4] = (value >> 8) & 0xFF;
     write_display.buff[5] =value& 0xFF;
 
     can_network_transmit_std_id(TWAI_CAN, &write_display);
-    //vTaskDelay(pdMS_TO_TICKS(10));
-
+    ESP_LOGI(TAG, "Wrote value 0x%04X to address 0x%04X", value, addr);   
 }
-void dwin_can_write(uint16_t addr, uint16_t value)
-{
-    write_display.buff[2] = (addr >> 8) & 0xFF;
-    write_display.buff[3] = addr & 0xFF;
-    write_display.buff[4] = (value >> 8) & 0xFF;
-    write_display.buff[5] =value& 0xFF;
 
-    can_network_transmit_std_id(TWAI_CAN, &write_display);
-    ESP_LOGI(TAG, "Wrote value 0x%04X to address 0x%04X", value, addr);
-    
-}
-//start stop command handler from display feedback
-void dwin_can_rx_handler(const can_msg_t *msg)
+static void dwin_can_rx_handler(const can_msg_t *msg)
 {
     ESP_LOGI(TAG,"Received id:%04X %02X %02X %02X %02X %02X %02X %02X %02X",msg->id,msg->buff[0],msg->buff[1],msg->buff[2],msg->buff[3],msg->buff[4],msg->buff[5],msg->buff[6],msg->buff[7]);
-
+    
     if(msg->buff[0]==0x06 && msg->buff[1]==READ_CMD){
         if(msg->buff[2]==((CCS2_GUN1_S_STOP_ADDR>>8)&0xFF) &&msg->buff[3]==(CCS2_GUN1_S_STOP_ADDR&0xFF)){
             if(msg->buff[6]){ // START
                 ESP_LOGI(TAG,"start command received");
-                display_feedback_flag.ccs2=true;
+                dwin_can_write(CCS2_GUN1_ADDR,STOP_CHARGING);
             }else{ // STOP
                 ESP_LOGI(TAG,"stop command received");
-                if(display_feedback_flag.ccs2_t){ // charging active
-                    display_feedback_flag.ccs2=false;
-                    ESP_LOGI(TAG,"gun is unplugged");
+                dwin_can_write(CCS2_GUN1_ADDR,START_CHARGING);
                 }
             }
         }
@@ -425,19 +439,13 @@ void dwin_can_rx_handler(const can_msg_t *msg)
 
     }
 }
-}
-
 
 static void clear_screen(uint16_t addr){
     dwin_can_write(ERR_STRING_ADDR,DISPLAY_TERMINATOR);
     dwin_can_write(ERR_NUMBER_ADDR,DISPLAY_TERMINATOR);
-    /*
-   for(uint16_t i=0;i<300;i++){
-        dwin_can_write(addr+i,' ');
-    }*/
 }
 
-void write_error_msg() {
+static void write_error_msg() {
     clear_screen(0x1800);
     clear_screen(0x1900);
     for(uint8_t i = 0; i < 12; i++) {
@@ -501,25 +509,28 @@ void write_error_msg() {
     error_num_addr = ERR_NUMBER_ADDR;
 }
 
-static void dwin_init_pages(void)
-{
+static void dwin_init_pages(void){
     reset_display();
     display_event_loop_init();
-    switch_to_page(0);
-    dwin_can_write(CCS2_GUN1_ADDR,UNPLUGGED);
-    dwin_can_write(CCS2_GUN1_S_STOP_ADDR,0);
-    //create_timers(CCS2_GUN1_ADDR,UNPLUGGED);
-    //esp_timer_start_once(timer_3sec,2000000);
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    switch_to_page(8);//gun is in unplugged state
-   // switch_to_page(10);
+    display_timer_event_loop_init();
+    timer_addr_data=(uint32_t)(CCS2_GUN1_ADDR << 16 & 0xffFF) |(uint16_t)(UNPLUGGED & 0XFFFF);
+    esp_timer_start_once(timer_3sec,3000000);
 }
+
+void dwin_can_write_float(uint16_t vp_addr, float value)
+{   
+    uint32_t raw;
+    memcpy(&raw, &value, sizeof(raw));
+    uint16_t high = (raw >> 16) & 0xFFFF;
+    uint16_t low  = raw & 0xFFFF;
+    dwin_can_write(vp_addr,high);
+    dwin_can_write(vp_addr+1,low);
+    ESP_LOGI(TAG,"[TX-FLOAT] VP=0x%04X -> MSG->highx%2x lowx%2x and value %.3f\n", vp_addr,high,low, value);
+}
+
 void display_init(){
-    uart_init();
-    //create_timers();
-    //energy_meter_init();
+    can_network_register_rx_cb(TWAI_CAN, dwin_can_rx_handler);
     dwin_init_pages();
-    xTaskCreate(ccs2_task,"ccs2_gun1_task",4096,NULL,4,NULL);
-    xTaskCreate(uart_task,"uart_task",4096,NULL,6,NULL);
-    }
+    esp_timer_create(&ccs2_timer_args, &timer_3sec);
+}
 
