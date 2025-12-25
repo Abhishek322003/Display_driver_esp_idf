@@ -113,7 +113,7 @@ static void reset_energy_meter(void)
 }
 
 void energy_meter_init(void){
-    nvs_flash_init();
+    nvs_flash_init();//modbus init
     gpio_set_direction((gpio_num_t)MODBUS_RE_DE_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level((gpio_num_t)MODBUS_RE_DE_PIN, 0);  
     mb_communication_info_t comm = {};

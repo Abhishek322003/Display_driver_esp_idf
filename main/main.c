@@ -16,8 +16,9 @@ void uart_task(void *arg);
 
 static const char *TAG = "MAIN";
 
-display_events_t main_event_1=CCS2_GUN_DISCONNECTED;
+display_events_t main_event_1=GUN_CONNECTED;
 esp_timer_handle_t timer_3sec;
+static gun_type_t active_gun = CCS2;   
 
 static void uart_init(){
     uart_config_t uart_conf = {
@@ -30,89 +31,125 @@ static void uart_init(){
     uart_driver_install(UART_NUM, UART_BUF_SIZE*2, 0, 0, NULL, 0);
     uart_param_config(UART_NUM, &uart_conf);
 }
-
 void handle_uart_gun_input(const char *cmd)
 {
-    display_events_t event;
-    if (cmd[1] == '1') {                 
-        event = (cmd[2] == '1') ? CCS2_GUN_CONNECTED: CCS2_GUN_DISCONNECTED;
-    }
-    else if (cmd[1] == '2') {            
-        event = (cmd[2] == '1') ? GUN2_TYPE6_CONNECTED: GUN2_TYPE6_DISCONNECTED;
-    }
-    else if (cmd[1] == '3') {            
-        event = (cmd[2] == '1') ? AC_SOCKET_CONNECTED: AC_SOCKET_DISCONNECTED;
-    }
-    else {
+    if (strlen(cmd) < 3) {
         ESP_LOGW(TAG, "Invalid gun command: %s", cmd);
         return;
     }
-    main_event_1=event;
-    send_display_event(&main_event_1);
-    ESP_LOGI(TAG, "Gun Event Sent: %s", cmd);
+    display_req_data_t data;
+    display_events_t event;
+    switch (cmd[1]) {
+        case '1': data.gun_type = CCS2; break;
+        case '2': data.gun_type = TYPE6; break;
+        case '3': data.gun_type = AC_SOCKET; break;
+        default:
+            ESP_LOGW(TAG, "Invalid gun id: %s", cmd);
+            return;
+    }
+    active_gun = data.gun_type;
+
+    if (cmd[2] == '1') {
+        event = GUN_CONNECTED;
+
+        switch (data.gun_type) {
+            case CCS2:      data.value = CCS2_GUN_CONNECTED;      break;
+            case TYPE6:     data.value = TYPE6_CONNECTED;         break;
+            case AC_SOCKET: data.value = AC_SOCKET_CONNECTED;     break;
+        }
+    }
+    else if (cmd[2] == '0') {
+        event = GUN_DISCONNECTED;
+
+        switch (data.gun_type) {
+            case CCS2:      data.value = CCS2_GUN_DISCONNECTED;   break;
+            case TYPE6:     data.value = TYPE6_DISCONNECTED;      break;
+            case AC_SOCKET: data.value = AC_SOCKET_DISCONNECTED;  break;
+        }
+    }
+    else {
+        ESP_LOGW(TAG, "Invalid gun state: %s", cmd);
+        return;
+    }
+    send_display_event(event, data);
+
+    ESP_LOGI(TAG,
+             "Gun Event Sent: %s | gun=%d | mask=0x%04X",
+             cmd,
+             data.gun_type,
+             data.value);
 }
 
 void handle_uart_error_input(char *cmd)
 {
     char *token = strtok(cmd + 1, " ");
+
     while (token != NULL) {
+
         uint8_t err_no = atoi(token);
+
         if (err_no >= 1 && err_no <= 11) {
-            send_display_value_event(ERROR_DISPLAY_EVENT, err_no);
-            ESP_LOGI(TAG, "Error Event Sent: e%d", err_no);
-        } 
+
+            display_req_data_t data = {
+                .gun_type = active_gun,
+                .value    = err_no
+            };
+
+            send_display_event(ERROR_DISPLAY_EVENT, data);
+
+            ESP_LOGI(TAG,
+                     "Error Event Sent: e%d | gun=%d",
+                     err_no,
+                     active_gun);
+        }
         else {
             ESP_LOGW(TAG, "Invalid error number: %s", token);
         }
+
         token = strtok(NULL, " ");
     }
 }
-
 void uart_task(void *arg)
 {
     uint8_t buf[UART_BUF_SIZE];
-
     while (1) {
-        int len = uart_read_bytes(UART_NUM,buf,sizeof(buf) - 1,pdMS_TO_TICKS(100));
+        int len = uart_read_bytes(
+            UART_NUM,
+            buf,
+            sizeof(buf) - 1,
+            pdMS_TO_TICKS(100)
+        );
         if (len <= 0) {
             continue;
         }
+
         buf[len] = '\0';
         char *cmd = (char *)buf;
         cmd[strcspn(cmd, "\r\n")] = 0;
+
+        if (strlen(cmd) == 0) {
+            continue;
+        }
+
         ESP_LOGI(TAG, "CMD: %s", cmd);
-        if (cmd[0] == 'g' || cmd[0] == 'G') {
-            handle_uart_gun_input(cmd);
-        }
-        else if (cmd[0] == 'e' || cmd[0] == 'E') {
-            handle_uart_error_input(cmd);
-        }
-        else if (!strncmp(cmd, "is", 2) || !strncmp(cmd, "IS", 2)) {
-            send_display_value_event(INTIAL_SOC, atof(&cmd[2]));
-        }
-        else if (!strncmp(cmd, "cs", 2) || !strncmp(cmd, "CS", 2)) {
-            send_display_value_event(CURRENT_SOC, atof(&cmd[2]));
-        }
-        else if (!strncmp(cmd, "dv", 2) || !strncmp(cmd, "DV", 2)) {
-            send_display_value_event(DEMAND_VOLTAGE, atof(&cmd[2]));
-        }
-        else if (!strncmp(cmd, "ur", 2) || !strncmp(cmd, "UR", 2)) {
-            send_display_value_event(UNIT_RATE, atof(&cmd[2]));
-        }
-        else if (!strncmp(cmd, "am", 2) || !strncmp(cmd, "AM", 2)) {
-            send_display_value_event(AMOUNT, atof(&cmd[2]));
-        }
-        else if (!strncmp(cmd, "cp", 2) || !strncmp(cmd, "CP", 2)) {
-            send_display_value_event(CHARGING_POWER, atof(&cmd[2]));
-        }
-        else if (!strncmp(cmd, "gt", 2) || !strncmp(cmd, "GT", 2)) {
-            send_display_value_event(GUN_TEMPERATURE, atof(&cmd[2]));
-        }
-        else {
-            ESP_LOGW(TAG, "Unknown command: %s", cmd);
+        char *token = strtok(cmd, " ");
+        while (token != NULL) {
+            if (token[0] == 'g' || token[0] == 'G') {
+                handle_uart_gun_input(token);
+            }
+            else if (token[0] == 'e' || token[0] == 'E') {
+                handle_uart_error_input(token);
+            }
+            else {
+                ESP_LOGW(TAG, "Unknown token: %s", token);
+            }
+
+            token = strtok(NULL, " ");
         }
     }
 }
+
+
 
 void app_main(void)
 {

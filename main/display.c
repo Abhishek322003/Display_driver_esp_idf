@@ -63,16 +63,17 @@ ESP_EVENT_DEFINE_BASE(TIMER_EVENT);
 static uint16_t error_flags;
 static const char *TAG="DISPLAY";
 static esp_timer_handle_t timer_3sec;
+static display_timer_events_t current_page=DEFAULT;
 static uint32_t timer_addr_data;
 static uint16_t error_str_addr=ERR_STRING_ADDR;
 static uint16_t error_num_addr=ERR_NUMBER_ADDR;
 static esp_event_loop_handle_t display_event_loop = NULL;
 static esp_event_loop_handle_t display_timer_event_loop=NULL;
-static can_msg_t read_display = {
+/*static can_msg_t read_display = {
     .id = DWIN_READ_ID,
     .dlc = 8,
     .buff = {0x06, READ_CMD, 0x00, 0x00, 0x00, 0x00}
-};
+};*/
 static can_msg_t write_display = {
     .id = DWIN_WRITE_ID,
     .dlc = 6,
@@ -81,7 +82,6 @@ static can_msg_t write_display = {
 
 static void set_the_error_flag(uint16_t value);
 static void timer_3sec_handler(void *addr_data);
-static void create_timer(uint16_t addr,uint16_t data);
 static void switch_to_page(uint8_t page_number);
 static void write_error_msg();
 static void display_timer_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data);
@@ -94,6 +94,14 @@ static esp_timer_create_args_t ccs2_timer_args = {
         .name = "ccs2_timer"
     };
 
+static inline void hide_data(uint16_t addr){
+    dwin_can_write(addr,0xff00);//0xff00 to hide the data 
+}
+
+static inline void remove_hide(uint16_t addr,uint16_t vp_addr){
+    dwin_can_write(addr,vp_addr);
+}
+
 static void display_timer_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data)
 {
 	(void)arg;
@@ -104,9 +112,12 @@ static void display_timer_event_handler(void *arg, esp_event_base_t base, int32_
         switch_to_page(8);
         ESP_LOGI(TAG,"PAGE8 EVENT");
 		break;
-    case PAGE1:
-    case PAGE2:
-    case PAGE8:
+    case UNHIDE_CCS2_CHARGE_ADDR:
+        remove_hide(CCS2_SP_ADDR,CCS2_ADDR_LOWER);
+        ESP_LOGI(TAG,"UNHIDE_CCS2_PAGE EVENT");
+    case PAGE1: break;
+    case PAGE2:break;
+    case PAGE8:break;
     case HOME_SCREEN:
         ESP_LOGI(TAG,"PAGE1");
 		break;
@@ -114,76 +125,106 @@ static void display_timer_event_handler(void *arg, esp_event_base_t base, int32_
     }
 }
 
+static void check_which_gun_connected(display_req_data_t *data){
+    ESP_LOGI(TAG,"checking which gun connected data->gun_type %d data->value %d",data->gun_type,data->value);
+    switch(data->gun_type){
+        case CCS2:
+                if(data->value!=CCS2_GUN_CONNECTED && data->value!=CCS2_GUN_DISCONNECTED){
+                ESP_LOGW(TAG,"INVALID CCS2 GUN EVENT");
+                return;
+                }
+                bool ccs2 = (data->value == CCS2_GUN_CONNECTED) ? true : false;
+                
+                ESP_LOGI(TAG,"ccs2 gun  timer started");
+                if(ccs2){
+                    esp_timer_start_once(timer_3sec,2000000);
+                    dwin_can_write(CCS2_GUN1_ADDR,PLUGGED);
+                    timer_addr_data = ((uint32_t)(CCS2_GUN1_ADDR & 0xFFFF) << 16) | (START_CHARGING & 0xFFFF);
+                    ESP_LOGI(TAG,"CCS2 GUN CONNECTED");
+                }
+                else{
+                    dwin_can_write(CCS2_GUN1_ADDR,UNPLUGGED);
+                    ESP_LOGI(TAG,"CCS2 GUN DISCONNECTED");
+        }
+        break;
+        case TYPE6:
+            if(data->value!=TYPE6_CONNECTED && data->value!=TYPE6_DISCONNECTED){
+                ESP_LOGW(TAG,"INVALID TYPE6 GUN EVENT");
+                return;
+        }
+        bool type6 = (data->value == TYPE6_CONNECTED) ? true : false;
+        
+        ESP_LOGI(TAG,"ccs2 gun  timer started");
+        if(type6){
+            esp_timer_start_once(timer_3sec,2000000);
+            dwin_can_write(TYPE6_GUN2_ADDR,PLUGGED);
+            timer_addr_data = ((uint32_t)(TYPE6_GUN2_ADDR & 0xFFFF) << 16) | (START_CHARGING & 0xFFFF);
+            ESP_LOGI(TAG,"TYPE6 GUN CONNECTED");
+        }
+        else{
+            dwin_can_write(TYPE6_GUN2_ADDR,UNPLUGGED);
+            ESP_LOGI(TAG,"TYPE6 GUN DISCONNECTED");
+        }break;
+        case AC_SOCKET:
+        ESP_LOGW(TAG,"writing for only CCS2 GUN");
+        break;
+        
+    }
+
+}
+
 static void display_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data)
 {
 	(void)arg;
 	(void)base;
-
+    float f_data=0;
 	display_events_t event = (display_events_t)event_id;
-
-	if (event > AC_SOCKET_DISCONNECTED && event_data == NULL) {
-		ESP_LOGW(TAG, "Event %d received without data", event);
-		return;
-	}
 	display_req_data_t *data = (display_req_data_t *)event_data;
-    uint16_t num=data->value%100;
-    uint16_t num1=data->value/100;
-    float f_data=num+(((float)num1/100));
+    if(event>=INTIAL_SOC && event<=GUN_TEMPERATURE){
+        uint16_t num=data->value%100;
+        uint16_t num1=data->value/100;
+        f_data=num+(((float)num1/100));
+    }   
 	switch (event) {
-	case CCS2_GUN_CONNECTED:
-        dwin_can_write(CCS2_GUN1_ADDR,PLUGGED);
-        create_timer(CCS2_GUN1_ADDR,START_CHARGING);
-        timer_addr_data = ((uint32_t)(CCS2_GUN1_ADDR & 0xFFFF) << 16) | (START_CHARGING & 0xFFFF);
-        esp_timer_start_once(timer_3sec,300000);
-        ESP_LOGI(TAG,"3sec timer staarted");
+	case GUN_CONNECTED:
+        check_which_gun_connected(data);
 		break;
-	case CCS2_GUN_DISCONNECTED:
-		dwin_can_write(CCS2_GUN1_ADDR, UNPLUGGED);
+	case GUN_DISCONNECTED:
+		check_which_gun_connected(data);
 		break;
-
-	case GUN2_TYPE6_CONNECTED:
-		dwin_can_write(0x2100, 0);
-		break;
-
-	case GUN2_TYPE6_DISCONNECTED:
-		dwin_can_write(0x2100, 4);
-		break;
-
-	case AC_SOCKET_CONNECTED:
-		dwin_can_write(0x2200, 0);
-		break;
-
-	case AC_SOCKET_DISCONNECTED:
-		dwin_can_write(0x2200, 4);
-		break;
-
 	case INTIAL_SOC:
-		dwin_can_write_float(CCS2_INITIAL_SOC, data->value);
-        ESP_LOGI(TAG,"INTIAL SOC EVENT RECIEVED %f",data->value);
-		break;
 
+		dwin_can_write(CCS2_INITIAL_SOC, data->value);
+        ESP_LOGI(TAG,"INTIAL SOC EVENT RECIEVED %d",data->value);
+		break;
 	case CURRENT_SOC:
-		dwin_can_write_float(CCS2_CURRENT_SOC, data->value);
+		dwin_can_write(CCS2_CURRENT_SOC, data->value);
+        ESP_LOGI(TAG,"CURRENT SOC EVENT RECIEVED %d",data->value);
 		break;
 
 	case DEMAND_VOLTAGE:
-		dwin_can_write_float(CCS2_DEMAND_VOLTAGE, data->value);
+		dwin_can_write_float(CCS2_DEMAND_VOLTAGE, f_data);
+        ESP_LOGI(TAG,"DEMAND VOLTAGE EVENT RECIEVED %f",f_data);
 		break;
 
 	case UNIT_RATE:
-		dwin_can_write_float(CCS2_UNIT_RATE, data->value);
+		dwin_can_write_float(CCS2_UNIT_RATE, f_data);
+        ESP_LOGI(TAG,"UNIT RATE EVENT RECIEVED %f",f_data);
 		break;
 
 	case AMOUNT:
-		dwin_can_write_float(CCS2_AMOUNT, data->value);
+		dwin_can_write_float(CCS2_AMOUNT, f_data);
+        ESP_LOGI(TAG,"AMOUNT EVENT RECIEVED %f",f_data);
 		break;
 
 	case CHARGING_POWER:
-		dwin_can_write_float(CCS2_CHARGING_POWER, data->value);
+		dwin_can_write_float(CCS2_CHARGING_POWER, f_data);
+        ESP_LOGI(TAG,"CHARGING POWER EVENT RECIEVED %f",f_data);
 		break;
 
 	case GUN_TEMPERATURE:
-		dwin_can_write_float(CCS2_GUN_TEMPERATURE, data->value);
+		dwin_can_write_float(CCS2_GUN_TEMPERATURE, f_data);
+        ESP_LOGI(TAG,"GUN TEMPERATURE EVENT RECIEVED %f",f_data);
 		break;
 	case ERROR_DISPLAY_EVENT:
         ESP_LOGI("DISPLAY:","error event recieved with data %d",data->value);
@@ -196,29 +237,16 @@ static void display_event_handler(void *arg, esp_event_base_t base, int32_t even
 	}
 }
 
-static inline void hide_data(uint16_t addr){
-    dwin_can_write(addr,0xff00);//0xff00 to hide the data 
-}
-
-static inline void remove_hide(uint16_t addr,uint16_t vp_addr){
-    dwin_can_write(addr,vp_addr);
-}
-
 static void timer_3sec_handler(void *addr_data){
     uint32_t packed = *(uint32_t *)addr_data;
     uint16_t addr = (packed >> 16) & 0xFFFF;
     uint16_t data = packed & 0xFFFF;
     dwin_can_write(addr, data);
     ESP_LOGI(TAG,"TIMER ENDED ONLY ONCE %x",packed);
-    esp_event_post_to(display_timer_event_loop,TIMER_EVENT,DEFAULT,NULL,0, 0);
+    esp_event_post_to(display_timer_event_loop,TIMER_EVENT,current_page,NULL,0, 0);
 }
  
-static void create_timer(uint16_t addr,uint16_t data)
-{
-    timer_addr_data = ((uint32_t)(addr & 0xFFFF) << 16) | (data & 0xFFFF);
-    esp_timer_create(&ccs2_timer_args, &timer_3sec);
-}
-
+    
 static void display_error_msg(bool error_addr_flag, const char *error_data)
 {
     uint16_t error_addr=0;
@@ -312,32 +340,18 @@ void send_display_timer_event(void* event){
         0
     );
 }
+void send_display_event(display_events_t event,display_req_data_t data){
 
-void send_display_event(void* event){
-    display_events_t ev=*(display_events_t *)event;
-    esp_event_post_to(
-        display_event_loop,
-        DISPLAY_EVENT,
-        ev,
-        NULL,
-        0,
-        0
-    );
-}
-
-void send_display_value_event(display_events_t event, uint16_t value){
-    display_req_data_t data = {
-        .value = value
-    };
     esp_event_post_to(
         display_event_loop,
         DISPLAY_EVENT,
         event,
         &data,
-        sizeof(data),
-        0
+        sizeof(display_req_data_t),
+        portMAX_DELAY
     );
 }
+
 
 static void switch_to_page(uint8_t page_number)
 {
@@ -418,28 +432,35 @@ void dwin_can_write(uint16_t addr, uint16_t value){
 
 static void dwin_can_rx_handler(const can_msg_t *msg)
 {
-    ESP_LOGI(TAG,"Received id:%04X %02X %02X %02X %02X %02X %02X %02X %02X",msg->id,msg->buff[0],msg->buff[1],msg->buff[2],msg->buff[3],msg->buff[4],msg->buff[5],msg->buff[6],msg->buff[7]);
+    ESP_LOGI(TAG,"Received id:%04X %02X %02X %02X %02X %02X %02X %02X %02X %d",msg->id,msg->buff[0],msg->buff[1],msg->buff[2],msg->buff[3],msg->buff[4],msg->buff[5],msg->buff[6],msg->buff[7],msg->dlc);
     
     if(msg->buff[0]==0x06 && msg->buff[1]==READ_CMD){
         if(msg->buff[2]==((CCS2_GUN1_S_STOP_ADDR>>8)&0xFF) &&msg->buff[3]==(CCS2_GUN1_S_STOP_ADDR&0xFF)){
             if(msg->buff[6]){ // START
                 ESP_LOGI(TAG,"start command received");
                 dwin_can_write(CCS2_GUN1_ADDR,STOP_CHARGING);
+                remove_hide(CCS2_SP_ADDR,CCS2_ADDR_LOWER);
             }else{ // STOP
                 ESP_LOGI(TAG,"stop command received");
                 dwin_can_write(CCS2_GUN1_ADDR,START_CHARGING);
+                hide_data(CCS2_SP_ADDR);
                 }
             }
-        }
         else if(msg->buff[2]==((CCS2_GUN1_ADDR>>8)&0xFF)&&msg->buff[3]==(CCS2_GUN1_ADDR&0xFF)){
-            if(msg->buff[6]==UNPLUGGED){
+            ESP_LOGI(TAG,"CCS2 GUN STATUS READ");
+            if(msg->buff[6]==START_CHARGING){
                 hide_data(CCS2_SP_ADDR);
-                switch_to_page(8);
+                dwin_can_write(CCS2_GUN1_S_STOP_ADDR,0);
+                ESP_LOGI(TAG,"ccs2 gun hiding started");
             }
-
+            else if(msg->buff[6]==PLUGGED){
+                timer_addr_data = ((uint32_t)(CCS2_GUN1_ADDR & 0xFFFF) << 16) | (START_CHARGING & 0xFFFF);
+                esp_timer_start_once(timer_3sec,2000000);
+                ESP_LOGI(TAG,"ccs2 gun  timer started");
+            }
+        }
     }
 }
-
 static void clear_screen(uint16_t addr){
     dwin_can_write(ERR_STRING_ADDR,DISPLAY_TERMINATOR);
     dwin_can_write(ERR_NUMBER_ADDR,DISPLAY_TERMINATOR);
@@ -514,7 +535,7 @@ static void dwin_init_pages(void){
     display_event_loop_init();
     display_timer_event_loop_init();
     timer_addr_data=(uint32_t)(CCS2_GUN1_ADDR << 16 & 0xffFF) |(uint16_t)(UNPLUGGED & 0XFFFF);
-    esp_timer_start_once(timer_3sec,3000000);
+    esp_timer_start_once(timer_3sec,3000000);//default screen after 3 sec
 }
 
 void dwin_can_write_float(uint16_t vp_addr, float value)
@@ -530,6 +551,7 @@ void dwin_can_write_float(uint16_t vp_addr, float value)
 
 void display_init(){
     can_network_register_rx_cb(TWAI_CAN, dwin_can_rx_handler);
+    esp_timer_create(&ccs2_timer_args, &timer_3sec);
     dwin_init_pages();
     esp_timer_create(&ccs2_timer_args, &timer_3sec);
 }
