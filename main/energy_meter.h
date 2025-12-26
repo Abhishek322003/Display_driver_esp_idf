@@ -3,31 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #define BAUDRATE 9600
-#define CCS2_INITIAL_SOC        0x1500
-#define CCS2_CURRENT_SOC        0x1505
-#define CCS2_DEMAND_VOLTAGE     0x150A
-#define CCS2_CHARGING_VOLTAGE   0x150F
-#define CCS2_DEMAND_CURRENT     0x1514
-#define CCS2_CHARGING_CURRENT   0x1519
-#define CCS2_DURATION           0x151E
-#define CCS2_UNIT_RATE          0x1523
-#define CCS2_AMOUNT             0x1528
-#define CCS2_CHARGING_POWER     0x152D
-#define CCS2_ENERGY_DELIVERED   0x1532
-#define CCS2_GUN_TEMPERATURE    0x1537
 
-#define CCS2_VOLTAGE_V1         0x1600
-#define CCS2_VOLTAGE_V2         0x1605
-#define CCS2_VOLTAGE_V3         0x160A
-#define CCS2_AVG_VOLTAGE        0x160F
-#define CCS2_CURRENT_I1         0x161E
-#define CCS2_CURRENT_I2         0x1623
-#define CCS2_CURRENT_I3         0x1628
-#define CCS2_AVG_CURRENT        0x162D
-#define CCS2_ACTIVE_POWER       0x1632
-#define CCS2_TOTAL_POWER        0x1637
-#define CCS2_FREQUENCY          0x1614
-#define CCS2_AVG_PF             0x1619
    
 #define DC_METER_SLAVE_ID        24
 #define AC_METER_SLAVE_ID       10

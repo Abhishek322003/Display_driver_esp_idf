@@ -51,21 +51,11 @@ void handle_uart_gun_input(const char *cmd)
 
     if (cmd[2] == '1') {
         event = GUN_CONNECTED;
-
-        switch (data.gun_type) {
-            case CCS2:      data.value = CCS2_GUN_CONNECTED;      break;
-            case TYPE6:     data.value = TYPE6_CONNECTED;         break;
-            case AC_SOCKET: data.value = AC_SOCKET_CONNECTED;     break;
-        }
+        data.value = 0;
     }
     else if (cmd[2] == '0') {
         event = GUN_DISCONNECTED;
-
-        switch (data.gun_type) {
-            case CCS2:      data.value = CCS2_GUN_DISCONNECTED;   break;
-            case TYPE6:     data.value = TYPE6_DISCONNECTED;      break;
-            case AC_SOCKET: data.value = AC_SOCKET_DISCONNECTED;  break;
-        }
+        data.value = 0;
     }
     else {
         ESP_LOGW(TAG, "Invalid gun state: %s", cmd);

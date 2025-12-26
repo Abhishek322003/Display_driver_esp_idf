@@ -38,9 +38,11 @@
 #define GUN2_SP_ADDR 0X8000
 #define TYPE6_GUN2_ADDR 0X2000
 #define TYPE6_GUN2_S_STOP_ADDR 0X2100
+#define TYPE6_GUN2_ERROR_ADDR 0X2050
 //GUN3
 #define AC_SOCKET_ADDR 0X3000 
 #define AC_SP_ADDR 0X7000
+///CCS2 GUN1 ADDRESES 
 ///CCS2 GUN1 ADDRESES 
 #define CCS2_ADDR_LOWER  0X1500
 #define CCS2_ADDR_UPPER 0X1555
@@ -102,6 +104,15 @@ static inline void remove_hide(uint16_t addr,uint16_t vp_addr){
     dwin_can_write(addr,vp_addr);
 }
 
+static uint16_t get_gun_base_addr(gun_type_t gun){
+    switch (gun) {
+        case CCS2:      return CCS2_GUN1_ADDR;
+        case TYPE6:     return TYPE6_GUN2_ADDR;
+        case AC_SOCKET: return AC_SOCKET_ADDR;
+        default:        return 0;
+    }
+}
+
 static void display_timer_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data)
 {
 	(void)arg;
@@ -113,7 +124,6 @@ static void display_timer_event_handler(void *arg, esp_event_base_t base, int32_
         ESP_LOGI(TAG,"PAGE8 EVENT");
 		break;
     case UNHIDE_CCS2_CHARGE_ADDR:
-        remove_hide(CCS2_SP_ADDR,CCS2_ADDR_LOWER);
         ESP_LOGI(TAG,"UNHIDE_CCS2_PAGE EVENT");
     case PAGE1: break;
     case PAGE2:break;
@@ -124,118 +134,131 @@ static void display_timer_event_handler(void *arg, esp_event_base_t base, int32_
 
     }
 }
+static uint16_t get_display_addr(display_events_t event, gun_type_t gun){
+    switch (event) {
+    case INITIAL_SOC:
+        if (gun == CCS2)       return CCS2_INITIAL_SOC;
+        if (gun == TYPE6)      return TYPE6_INITIAL_SOC;
+        if (gun == AC_SOCKET)  return AC_SOCKET_INITIAL_SOC;
+        break;
+    case CURRENT_SOC:
+        if (gun == CCS2)       return CCS2_CURRENT_SOC;
+        if (gun == TYPE6)      return TYPE6_CURRENT_SOC;
+        if (gun == AC_SOCKET)  return AC_SOCKET_CURRENT_SOC;
+        break;
+    case DEMAND_VOLTAGE:
+        if (gun == CCS2)       return CCS2_DEMAND_VOLTAGE;
+        if (gun == TYPE6)      return TYPE6_DEMAND_VOLTAGE;
+        if (gun == AC_SOCKET)  return AC_SOCKET_DEMAND_VOLTAGE;
+        break;
+    case CHARGING_POWER:
+        if (gun == CCS2)       return CCS2_CHARGING_POWER;
+        if (gun == TYPE6)      return TYPE6_CHARGING_POWER;
+        if (gun == AC_SOCKET)  return AC_SOCKET_CHARGING_POWER;
+        break;
+    case UNIT_RATE:
+        if (gun == CCS2)       return CCS2_UNIT_RATE;
+        if (gun == TYPE6)      return TYPE6_UNIT_RATE;
+        if (gun == AC_SOCKET)  return AC_SOCKET_UNIT_RATE;
+        break;
+    case AMOUNT:
+        if (gun == CCS2)       return CCS2_AMOUNT;
+        if (gun == TYPE6)      return TYPE6_AMOUNT;
+        if (gun == AC_SOCKET)  return AC_SOCKET_AMOUNT;
+        break;
+    case GUN_TEMPERATURE:
+        if (gun == CCS2)       return CCS2_GUN_TEMPERATURE;
+        if (gun == TYPE6)      return TYPE6_GUN_TEMPERATURE;
+        if (gun == AC_SOCKET)  return AC_SOCKET_GUN_TEMPERATURE;
+        break;
 
-static void check_which_gun_connected(display_req_data_t *data){
-    ESP_LOGI(TAG,"checking which gun connected data->gun_type %d data->value %d",data->gun_type,data->value);
-    switch(data->gun_type){
-        case CCS2:
-                if(data->value!=CCS2_GUN_CONNECTED && data->value!=CCS2_GUN_DISCONNECTED){
-                ESP_LOGW(TAG,"INVALID CCS2 GUN EVENT");
-                return;
-                }
-                bool ccs2 = (data->value == CCS2_GUN_CONNECTED) ? true : false;
-                
-                ESP_LOGI(TAG,"ccs2 gun  timer started");
-                if(ccs2){
-                    esp_timer_start_once(timer_3sec,2000000);
-                    dwin_can_write(CCS2_GUN1_ADDR,PLUGGED);
-                    timer_addr_data = ((uint32_t)(CCS2_GUN1_ADDR & 0xFFFF) << 16) | (START_CHARGING & 0xFFFF);
-                    ESP_LOGI(TAG,"CCS2 GUN CONNECTED");
-                }
-                else{
-                    dwin_can_write(CCS2_GUN1_ADDR,UNPLUGGED);
-                    ESP_LOGI(TAG,"CCS2 GUN DISCONNECTED");
-        }
+    default:
         break;
-        case TYPE6:
-            if(data->value!=TYPE6_CONNECTED && data->value!=TYPE6_DISCONNECTED){
-                ESP_LOGW(TAG,"INVALID TYPE6 GUN EVENT");
-                return;
-        }
-        bool type6 = (data->value == TYPE6_CONNECTED) ? true : false;
-        
-        ESP_LOGI(TAG,"ccs2 gun  timer started");
-        if(type6){
-            esp_timer_start_once(timer_3sec,2000000);
-            dwin_can_write(TYPE6_GUN2_ADDR,PLUGGED);
-            timer_addr_data = ((uint32_t)(TYPE6_GUN2_ADDR & 0xFFFF) << 16) | (START_CHARGING & 0xFFFF);
-            ESP_LOGI(TAG,"TYPE6 GUN CONNECTED");
-        }
-        else{
-            dwin_can_write(TYPE6_GUN2_ADDR,UNPLUGGED);
-            ESP_LOGI(TAG,"TYPE6 GUN DISCONNECTED");
-        }break;
-        case AC_SOCKET:
-        ESP_LOGW(TAG,"writing for only CCS2 GUN");
-        break;
-        
+    }
+    return 0;  
+}
+
+
+static void write_display_event(display_events_t event,display_req_data_t *data,float f_data){
+    uint16_t addr = get_display_addr(event, data->gun_type);
+    if (addr == 0) {
+        ESP_LOGW(TAG, "Invalid addr event=%d gun=%d", event, data->gun_type);
+        return;
+    }
+    if (event == INITIAL_SOC || event == CURRENT_SOC) {
+        dwin_can_write(addr, data->value);
+    } else {
+        dwin_can_write_float(addr, f_data);
+    }
+}
+
+static void check_which_gun(display_req_data_t *data, bool connect)
+{
+    uint16_t addr = get_gun_base_addr(data->gun_type);
+
+    ESP_LOGI(TAG, "Gun=%d value=%d connect=%d",
+             data->gun_type, data->value, connect);
+
+    if (addr == 0) {
+        ESP_LOGW(TAG, "Invalid gun type");
+        return;
     }
 
+    dwin_can_write(addr, connect ? PLUGGED : UNPLUGGED);
+    if (connect) {
+        timer_addr_data = ((uint32_t)(addr & 0xFFFF) << 16) |
+                          (START_CHARGING & 0xFFFF);
+        ESP_LOGI(TAG, "Gun %d CONNECTED", data->gun_type);
+    } else {
+        ESP_LOGI(TAG, "Gun %d DISCONNECTED", data->gun_type);
+    }
 }
 
-static void display_event_handler(void *arg, esp_event_base_t base, int32_t event_id, void *event_data)
+
+static void display_event_handler(void *arg,esp_event_base_t base,int32_t event_id,void *event_data)
 {
-	(void)arg;
-	(void)base;
-    float f_data=0;
-	display_events_t event = (display_events_t)event_id;
-	display_req_data_t *data = (display_req_data_t *)event_data;
-    if(event>=INTIAL_SOC && event<=GUN_TEMPERATURE){
-        uint16_t num=data->value%100;
-        uint16_t num1=data->value/100;
-        f_data=num+(((float)num1/100));
-    }   
-	switch (event) {
-	case GUN_CONNECTED:
-        check_which_gun_connected(data);
-		break;
-	case GUN_DISCONNECTED:
-		check_which_gun_connected(data);
-		break;
-	case INTIAL_SOC:
+    (void)arg;
+    (void)base;
+    display_events_t event = (display_events_t)event_id;
+    display_req_data_t *data = (display_req_data_t *)event_data;
+    float f_data = 0;
+    if (event >= INITIAL_SOC && event <= GUN_TEMPERATURE) {
+        uint16_t num  = data->value % 100;
+        uint16_t num1 = data->value / 100;
+        f_data = num + ((float)num1 / 100);
+    }
+    switch (event) {
+    case GUN_CONNECTED:
+        esp_timer_start_once(timer_3sec, 2000000);
+        timer_addr_data = ((uint32_t)(CCS2_GUN1_ADDR & 0xFFFF) << 16) |(START_CHARGING & 0xFFFF);
+        check_which_gun(data, true);
+        break;
+    case GUN_DISCONNECTED:
+        check_which_gun(data, false);
+        break;
+    case INITIAL_SOC:
+    case CURRENT_SOC:
+    case DEMAND_VOLTAGE:
+    case UNIT_RATE:
+    case AMOUNT:
+    case CHARGING_POWER:
+    case GUN_TEMPERATURE:
+        write_display_event(event, data, f_data);
+        ESP_LOGI(TAG, "Display event %d value=%d f=%f",event, data->value, f_data);
+        break;
 
-		dwin_can_write(CCS2_INITIAL_SOC, data->value);
-        ESP_LOGI(TAG,"INTIAL SOC EVENT RECIEVED %d",data->value);
-		break;
-	case CURRENT_SOC:
-		dwin_can_write(CCS2_CURRENT_SOC, data->value);
-        ESP_LOGI(TAG,"CURRENT SOC EVENT RECIEVED %d",data->value);
-		break;
-
-	case DEMAND_VOLTAGE:
-		dwin_can_write_float(CCS2_DEMAND_VOLTAGE, f_data);
-        ESP_LOGI(TAG,"DEMAND VOLTAGE EVENT RECIEVED %f",f_data);
-		break;
-
-	case UNIT_RATE:
-		dwin_can_write_float(CCS2_UNIT_RATE, f_data);
-        ESP_LOGI(TAG,"UNIT RATE EVENT RECIEVED %f",f_data);
-		break;
-
-	case AMOUNT:
-		dwin_can_write_float(CCS2_AMOUNT, f_data);
-        ESP_LOGI(TAG,"AMOUNT EVENT RECIEVED %f",f_data);
-		break;
-
-	case CHARGING_POWER:
-		dwin_can_write_float(CCS2_CHARGING_POWER, f_data);
-        ESP_LOGI(TAG,"CHARGING POWER EVENT RECIEVED %f",f_data);
-		break;
-
-	case GUN_TEMPERATURE:
-		dwin_can_write_float(CCS2_GUN_TEMPERATURE, f_data);
-        ESP_LOGI(TAG,"GUN TEMPERATURE EVENT RECIEVED %f",f_data);
-		break;
-	case ERROR_DISPLAY_EVENT:
-        ESP_LOGI("DISPLAY:","error event recieved with data %d",data->value);
+    case ERROR_DISPLAY_EVENT:
+        ESP_LOGI(TAG, "Error event %d", data->value);
         switch_to_page(4);
-        dwin_can_write(CCS2_GUN1_ADDR,ERROR_SCREEN);
+        dwin_can_write(CCS2_GUN1_ADDR, ERROR_SCREEN);
         set_the_error_flag(data->value);
-		break;
-	default:
-		break;
-	}
+        break;
+
+    default:
+        break;
+    }
 }
+
 
 static void timer_3sec_handler(void *addr_data){
     uint32_t packed = *(uint32_t *)addr_data;
@@ -553,6 +576,5 @@ void display_init(){
     can_network_register_rx_cb(TWAI_CAN, dwin_can_rx_handler);
     esp_timer_create(&ccs2_timer_args, &timer_3sec);
     dwin_init_pages();
-    esp_timer_create(&ccs2_timer_args, &timer_3sec);
 }
 
